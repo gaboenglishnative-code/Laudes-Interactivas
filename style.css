@@ -42,6 +42,10 @@ body {
   padding: max(28px, env(safe-area-inset-top)) 22px max(22px, env(safe-area-inset-bottom));
 }
 
+.pantalla[hidden] {
+  display: none;
+}
+
 button {
   font-family: inherit;
   -webkit-tap-highlight-color: transparent;
@@ -311,6 +315,10 @@ input:focus-visible {
   flex-shrink: 0;
 }
 
+.panel-config[hidden] {
+  display: none;
+}
+
 .panel-config label {
   font-size: 13px;
   color: var(--tinta-suave);
@@ -382,6 +390,10 @@ input:focus-visible {
   align-items: center;
   justify-content: center;
   gap: 7px;
+}
+
+.indicador-escucha[hidden] {
+  display: none;
 }
 
 .punto-escucha {
