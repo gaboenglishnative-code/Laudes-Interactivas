@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Modo Rezar — Liturgia de las Horas</title>
+<meta name="description" content="Reza la Liturgia de las Horas guiado por voz, en el celular o en el computador." />
+<meta name="theme-color" content="#8A1C1C" />
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="icon" href="icons/icon-192.png" />
+<link rel="apple-touch-icon" href="icons/icon-192.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Modo Rezar" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;0,8..60,600;1,8..60,400;1,8..60,500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<div id="app">
+
+  <!-- PANTALLA: INICIO / SELECTOR -->
+  <section id="pantalla-inicio" class="pantalla" aria-hidden="false">
+    <header class="portada">
+      <p class="portada-eyebrow">Índice de horas</p>
+      <h1 class="portada-titulo">Modo&nbsp;Rezar</h1>
+      <p class="portada-sub">Liturgia de las Horas, leída en voz alta y guiada paso a paso — desde la fuente de <span class="fuente">liturgiadelashoras.github.io</span></p>
+    </header>
+
+    <div class="selector-fecha">
+      <label for="campo-fecha">Fecha</label>
+      <div class="fecha-fila">
+        <input type="date" id="campo-fecha" />
+        <button id="btn-hoy" type="button" class="btn-texto">Hoy</button>
+      </div>
+    </div>
+
+    <nav class="lista-horas" id="lista-horas" aria-label="Horas del día"></nav>
+
+    <p class="nota-instalar" id="nota-instalar" hidden>
+      ¿Rezas aquí seguido? <button id="btn-instalar" type="button" class="btn-link">Instala Modo Rezar</button> para abrirlo como una app, sin buscador.
+    </p>
+  </section>
+
+  <!-- PANTALLA: CARGANDO -->
+  <section id="pantalla-carga" class="pantalla" hidden>
+    <div class="carga-caja">
+      <div class="carga-cruz" aria-hidden="true">✝</div>
+      <p id="texto-carga">Buscando el oficio del día…</p>
+    </div>
+  </section>
+
+  <!-- PANTALLA: ERROR -->
+  <section id="pantalla-error" class="pantalla" hidden>
+    <div class="error-caja">
+      <p class="error-titulo">No pude encontrar el texto</p>
+      <p id="texto-error" class="error-texto">Puede que esta hora no esté publicada para el día elegido.</p>
+      <button id="btn-volver-error" type="button" class="btn-primario">Volver al índice</button>
+    </div>
+  </section>
+
+  <!-- PANTALLA: ORACIÓN -->
+  <section id="pantalla-oracion" class="pantalla" hidden>
+    <header class="oracion-encabezado">
+      <button id="btn-salir" type="button" class="btn-icono" aria-label="Salir">✕</button>
+      <h2 id="oracion-titulo">Laudes</h2>
+      <button id="btn-config" type="button" class="btn-icono" aria-label="Ajustes de voz">⚙</button>
+    </header>
+
+    <div class="regleta" aria-hidden="true">
+      <div id="regleta-progreso" class="regleta-progreso"></div>
+    </div>
+
+    <div id="panel-config" class="panel-config" hidden>
+      <label for="rango-velocidad">Velocidad de lectura</label>
+      <input type="range" id="rango-velocidad" min="0.6" max="1.2" step="0.02" value="0.88" />
+      <label class="check-repetir">
+        <input type="checkbox" id="check-autoavanzar" checked />
+        Avanzar solo mientras la voz lee
+      </label>
+      <label class="check-repetir">
+        <input type="checkbox" id="check-reconocer" />
+        Reconocer cuando yo hablo (antífonas y respuestas)
+      </label>
+      <p id="nota-reconocer" class="nota-reconocer" hidden></p>
+    </div>
+
+    <main class="oracion-cuerpo">
+      <p id="oracion-etiqueta" class="oracion-etiqueta">Sección</p>
+      <p id="oracion-texto" class="oracion-texto"></p>
+      <p id="oracion-estado" class="oracion-estado" aria-live="polite"></p>
+      <p id="indicador-escucha" class="indicador-escucha" hidden>
+        <span class="punto-escucha" aria-hidden="true"></span> Escuchando…
+      </p>
+
+      <div id="pieza-audio" class="pieza-audio" hidden>
+        <audio id="reproductor-pieza" controls></audio>
+        <p id="pieza-audio-nombre" class="pieza-audio-nombre"></p>
+        <div class="pieza-audio-acciones">
+          <button id="btn-cambiar-audio" type="button" class="btn-link">Cambiar audio</button>
+          <button id="btn-quitar-audio" type="button" class="btn-link">Quitar</button>
+        </div>
+      </div>
+
+      <div id="pieza-asignar" class="pieza-asignar" hidden>
+        <button id="btn-asignar-audio" type="button" class="btn-link">🎵 Lo tengo en formato canción — asignar audio</button>
+      </div>
+
+      <input type="file" id="input-audio" accept="audio/*" hidden />
+    </main>
+
+    <footer class="oracion-controles">
+      <button id="btn-atras" type="button" class="btn-secundario">Atrás</button>
+      <button id="btn-escuchar" type="button" class="btn-secundario" title="Repetir en voz alta">🔊</button>
+      <button id="btn-continuar" type="button" class="btn-primario">Continuar</button>
+    </footer>
+
+    <p id="oracion-folio" class="oracion-folio"></p>
+  </section>
+
+</div>
+
+<script src="app.js" defer></script>
+</body>
+</html>
