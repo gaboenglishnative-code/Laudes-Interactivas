@@ -249,6 +249,33 @@ input:focus-visible {
   line-height: 1.5;
 }
 
+.opciones-caja {
+  margin: auto;
+  width: 100%;
+  max-width: 500px;
+  text-align: center;
+}
+
+.opciones-titulo {
+  font-size: 21px;
+  margin: 0 0 6px;
+}
+
+.opciones-sub {
+  color: var(--tinta-suave);
+  font-size: 14px;
+  margin: 0 0 22px;
+}
+
+.opciones-caja .lista-horas {
+  text-align: left;
+  margin-bottom: 22px;
+}
+
+.opciones-caja .hora-nombre {
+  font-size: 17px;
+}
+
 /* ---------- Pantalla de oración ---------- */
 
 #pantalla-oracion {
@@ -328,6 +355,34 @@ input:focus-visible {
 }
 
 .check-repetir { cursor: pointer; }
+
+.fila-clave {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+#campo-clave-voz {
+  flex: 1;
+  min-width: 0;
+  font-family: inherit;
+  font-size: 14px;
+  padding: 8px 10px;
+  color: var(--tinta);
+  background: transparent;
+  border: 1px solid var(--linea);
+  border-radius: 4px;
+}
+
+#campo-clave-voz:focus {
+  outline: none;
+  border-color: var(--rubrica);
+}
+
+#btn-borrar-clave-voz {
+  align-self: flex-start;
+  font-size: 12px;
+}
 
 #rango-velocidad { width: 100%; accent-color: var(--rubrica); }
 
