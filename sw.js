@@ -1,10 +1,11 @@
-const CACHE = 'modo-rezar-v1';
+const CACHE = 'modo-rezar-v4';
 
 const ARCHIVOS_SHELL = [
   './',
   './index.html',
   './style.css',
   './app.js',
+  './voz-fish.js',
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png',
