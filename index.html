@@ -16,6 +16,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;0,8..60,600;1,8..60,400;1,8..60,500&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="style.css" />
+<script src="voz-fish.js" defer></script>
 </head>
 <body>
 
@@ -84,8 +85,18 @@
     </div>
 
     <div id="panel-config" class="panel-config" hidden>
+      <p id="estado-voz" class="nota-reconocer">Voz Fish Audio: en espera.</p>
+
+      <label for="campo-clave-voz">Clave de Fish Audio (solo en este dispositivo)</label>
+      <div class="fila-clave">
+        <input type="password" id="campo-clave-voz" autocomplete="off" spellcheck="false"
+               placeholder="Pega aquí tu clave de Fish Audio" />
+        <button id="btn-guardar-clave-voz" type="button" class="btn-texto">Guardar</button>
+      </div>
+      <button id="btn-borrar-clave-voz" type="button" class="btn-link" hidden>Borrar la clave de este dispositivo</button>
+
       <label for="rango-velocidad">Velocidad de lectura</label>
-      <input type="range" id="rango-velocidad" min="0.6" max="1.2" step="0.02" value="0.88" />
+      <input type="range" id="rango-velocidad" min="0.7" max="1.3" step="0.02" value="1" />
       <label class="check-repetir">
         <input type="checkbox" id="check-autoavanzar" checked />
         Avanzar solo mientras la voz lee
@@ -95,6 +106,7 @@
         Reconocer cuando yo hablo (antífonas y respuestas)
       </label>
       <p id="nota-reconocer" class="nota-reconocer" hidden></p>
+      <button id="btn-activar-mic" type="button" class="btn-link">Activar micrófono ahora</button>
     </div>
 
     <main class="oracion-cuerpo">
@@ -119,6 +131,8 @@
       </div>
 
       <input type="file" id="input-audio" accept="audio/*" hidden />
+
+      <audio id="reproductor-voz" hidden></audio>
     </main>
 
     <footer class="oracion-controles">
