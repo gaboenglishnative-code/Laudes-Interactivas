@@ -16,9 +16,11 @@ igual en el celular que en el computador.
   sin proxy ni servidor propio.
 - La fuente marca las rúbricas (`V.`, `R.`, `Ant.`, títulos de sección)
   en rojo (`<FONT COLOR="#FF0000">`) y el texto que se reza en negro.
-  `app.js` reconstruye esas líneas y las clasifica: título, voz guía,
-  respuesta del usuario, antífona o lectura — sin depender de heurísticas
-  de mayúsculas como el prototipo anterior.
+  `liturgia.js` reconstruye esas líneas y las clasifica: título, voz
+  guía, respuesta del usuario, antífona o lectura — sin depender de
+  heurísticas de mayúsculas como el prototipo anterior. Ese archivo lo
+  usan tanto el navegador como el generador nocturno de audio, para que
+  los dos produzcan exactamente el mismo texto.
 - No se copia ni un solo texto litúrgico a mano: todo sale siempre de la
   fuente original, al vuelo.
 
@@ -36,14 +38,35 @@ python3 -m http.server 8080
 
 y abre `http://localhost:8080` en el navegador.
 
+**Ojo con la voz en local.** El navegador no genera la voz buena: solo
+reproduce el audio ya preparado que encuentra en la carpeta `dias/`, al
+lado de `index.html`. En el sitio publicado esa carpeta la llena cada
+madrugada el workflow "Preparar la voz del día". En tu computador, si
+no está, la app lee con la voz del sistema (la robótica). Para oír la
+voz buena en local:
+
+- pon al lado de `index.html` una carpeta `dias/` ya generada, o
+- genérala tú mismo (necesita Python con `sherpa-onnx soundfile numpy`
+  y `npm install jsdom`):
+
+  ```bash
+  node herramientas/generar-dia.js --dias 1 --salida . --cache voz-cache
+  ```
+
+En Ajustes, la línea de "Voz" dice si el día está preparado. Si
+acabas de poner la carpeta y sigue diciendo que no, recarga con
+Ctrl+Shift+R.
+
 ## Cómo publicarla para usarla desde el celular también
 
 Cualquier hosting de archivos estáticos sirve, por ejemplo GitHub Pages,
 Netlify o Vercel (gratis):
 
 1. Sube esta carpeta tal cual a un repositorio de GitHub.
-2. Activa GitHub Pages para ese repositorio (Settings → Pages → rama
-   `main`, carpeta raíz).
+2. Activa GitHub Pages para ese repositorio. Si vas a usar el audio
+   pregenerado (ver más abajo), elige **Settings → Pages → Source:
+   "GitHub Actions"**; si no, sirve igual desde la rama `main`, carpeta
+   raíz.
 3. Entra a la URL que te da GitHub Pages desde el celular y el PC.
 4. En el celular (Chrome/Safari) usa "Añadir a pantalla de inicio"; en
    el PC (Chrome/Edge) aparecerá un botón "Instalar app" — la app
@@ -86,6 +109,28 @@ micrófono una y otra vez. En ajustes hay un botón **"Activar micrófono
 ahora"** para conceder el permiso una sola vez, de forma explícita, antes
 de empezar a rezar — así no aparece de sorpresa a mitad de una antífona.
 
+### Por qué reconocía "a veces sí y a veces no" (arreglado)
+
+1. **Solo se comparaba el último pedazo oído.** Si hacías una pausa a
+   mitad de la antífona —lo natural en una coma—, el reconocedor la partía
+   en dos, y la segunda mitad sola nunca llegaba al 60 % de palabras. Ahora
+   se acumula todo lo que dices en el turno.
+2. **En Android el reconocedor se corta solo tras cada frase**, y al
+   reiniciarlo se perdía lo ya dicho. Ahora se guarda antes de reiniciar.
+3. **Se escuchaba siempre en español de España.** Ahora se usa tu región
+   (español de Colombia en Bogotá, de México en Ciudad de México…), que
+   entiende mucho mejor tu acento. Sale del idioma del navegador o, si
+   está en inglés, de tu zona horaria.
+4. **Se aceptan palabras casi iguales** ("misericordias" por
+   "misericordia"), que el reconocedor confunde a menudo.
+5. **En Brave el servicio viene apagado**: antes se reintentaba en bucle
+   sin avisar; ahora lo dice en pantalla (en Chrome y Edge sí funciona).
+
+Probado con las mismas palabras exactas contra la lógica anterior:
+antífona con pausa en la coma, antífona larga en tres respiros, sesión
+cortada por Android, y palabras casi iguales — **las cuatro fallaban
+antes y ahora avanzan**.
+
 Límites importantes, para que no te sorprenda:
 - **Safari en iPhone/iPad no soporta esto todavía** (no es un bug de la
   app, es que Apple no implementa esa función del navegador). Ahí solo
@@ -96,6 +141,39 @@ Límites importantes, para que no te sorprenda:
 - El botón manual nunca desaparece: el reconocimiento es una ayuda
   extra, no un reemplazo — si no te reconoce bien, simplemente tocas
   "Ya respondí" / "Ya la repetí" como antes.
+
+## Audífonos: por qué a veces no sonaba nada (arreglado)
+
+Cuando una página abre el micrófono de unos **audífonos Bluetooth**, el
+sistema los pasa a "modo llamada". En Windows eso deja **muda** la salida
+estéreo normal; en el celular el sonido baja de calidad o se va por el
+altavoz. Al cerrar el micrófono tardan un momento en volver al modo
+normal. La app abría el micrófono en tu turno y arrancaba el audio
+siguiente justo en ese instante — de ahí el silencio.
+
+Lo que cambió:
+
+- **El micrófono nunca está abierto mientras la app habla**, y antes de
+  hablar espera 0,8 s a que los audífonos vuelvan al modo normal.
+- **Ajustes → "Micrófono para reconocer"**: con audífonos Bluetooth,
+  elige ahí el micrófono del computador o del celular. Así los audífonos
+  **nunca** pasan a modo llamada y el audio no se corta. Si tu micrófono
+  predeterminado es el de los audífonos, la app lo detecta y lo avisa.
+- **Si el audio se pausa solo** (audífonos que se desconectan, el
+  Bluetooth que se cae un segundo, una notificación), antes la app se
+  quedaba colgada y muda. Ahora dice "En pausa… Toca ▶ para seguir", el
+  botón 🔊 pasa a ▶, y sigue exactamente desde donde iba.
+- **Si el navegador no deja sonar**, antes se saltaba el texto sin leerlo
+  o pasaba a la voz robótica. Ahora pide un toque y lo lee completo.
+- **Los botones de los audífonos funcionan**: play/pausa pausa y sigue la
+  oración, siguiente/anterior avanzan o retroceden un paso. En el celular
+  también salen los controles en la pantalla bloqueada.
+- **La voz del sistema ya no puede colgar la app**: en Android a veces
+  nunca avisa que terminó; ahora hay un vigilante que sigue solo.
+
+De paso apareció otro fallo: **las antífonas nunca usaban el audio
+preparado del día** — siempre las leía la voz robótica del sistema, aunque
+el día estuviera listo. Corregido.
 
 ## Lecturas y salmos largos, de corrido y con el ritmo correcto
 
@@ -166,48 +244,198 @@ dice "Preparando la voz…" mientras tanto, y la app va pidiendo el audio
 del paso siguiente mientras todavía estás en el actual. La segunda vez
 que aparece ese texto ya está en caché y suena al instante.
 
-## La voz: Fish Audio
+## Compartirla con otras personas (sin repartir ninguna clave)
 
-La voz principal es **Fish Audio**, con una voz fija:
+Esta es la parte que hace que la app se pueda pasar a quien sea. **Quien
+la usa no necesita clave, ni cuenta, ni pagar nada, ni configurar nada.**
 
+La idea aprovecha algo propio de esta app: la Liturgia de las Horas de un
+día es **idéntica para todo el mundo**. No hay nada personalizado que
+generar por usuario. Así que el audio no se genera cuando alguien reza —
+se genera **una vez, de madrugada, para todos**:
+
+1. Una GitHub Action corre cada noche a las 3:00 de Bogotá.
+2. Prepara los próximos 3 días: parsea la liturgia y genera el audio de
+   cada bloque que falte con una **voz local** (Supertonic, por defecto),
+   ahí mismo en la máquina de GitHub — sin ninguna API ni clave — y
+   verifica con Whisper que no se haya comido ninguna palabra.
+3. Publica el sitio entero —app y audio— en GitHub Pages.
+
+Quien entra descarga mp3 estáticos, como descarga el CSS. Suena
+**instantáneo**, porque no hay nada que generar en el momento.
+
+### Qué hay que hacer una sola vez
+
+1. **Settings → Pages → Source: "GitHub Actions"**
+   (no "Deploy from a branch"). El workflow publica directamente, así los
+   mp3 nunca entran al historial de git y el repositorio no engorda.
+2. En la pestaña **Actions**, darle a "Preparar la voz del día" →
+   **Run workflow** para la primera vez, sin esperar a la madrugada.
+
+Ya no hace falta ningún secreto: la voz por defecto es local.
+
+### Por qué esto sale gratis
+
+| | |
+|---|---|
+| GitHub Actions en repos públicos | Gratis, sin límite de minutos — sigue igual tras el cambio de precios de enero de 2026 |
+| GitHub Pages | Gratis |
+| Voz (Supertonic, local) | Gratis para siempre: corre en la propia máquina de GitHub |
+
+Con la voz local no hay nada con fecha de vencimiento. (Con Fish Audio sí
+la había: su modelo gratis va hasta el 30 de noviembre de 2026.) Medidas las 4 semanas anteriores
+reales (196 archivos, 1.099.251 bytes), solo **575.670 bytes son texto
+único**: los salmos se repiten con el ciclo de 4 semanas del salterio, y
+lo que cambia a diario son antífonas y lecturas propias. El generador
+nombra cada mp3 con el **hash de su texto**, así que un salmo generado
+hace tres semanas se reutiliza solo cuando vuelve a tocar.
+
+Con la voz local eso se traduce en tiempo de máquina, no en dinero: una
+vez caliente la caché, cada noche solo hay que generar unos 12 minutos de
+audio nuevo. Medido con Kokoro: Laudes completa (23 bloques, 7,7 minutos
+de audio) se generó en 4 minutos con 2 núcleos; el runner tiene 4.
+
+### Qué pasa con los días que no están preparados
+
+El generador cubre hoy y los dos días siguientes, que es lo que se reza
+en la práctica. Si alguien elige una fecha vieja o futura fuera de esa
+ventana, la app hace exactamente lo de siempre: va a la fuente, la
+parsea, y la lee con la voz que tenga disponible. Nada se rompe.
+
+### Una nota sobre el parser
+
+`liturgia.js` contiene todo lo que entiende el HTML de la fuente, y lo
+cargan **los dos**: el navegador y el generador nocturno. No está
+duplicado a propósito — si lo estuviera, cualquier arreglo en un lado
+dejaría al otro produciendo un texto distinto, y el audio pregenerado
+dejaría de corresponder con lo que la app muestra. Lo mismo hace
+`voz-comun.js` con los parámetros de la petición a Fish Audio.
+
+Hay una prueba que verifica justamente eso:
+
+```bash
+npm install jsdom
+pip install sherpa-onnx soundfile numpy
+node herramientas/generar-dia.js --seco                    # qué generaría, sin generar nada
+node herramientas/generar-dia.js --dias 1 --horas laudes   # genera una hora de verdad
+node herramientas/prueba-e2e.js sitio                      # la app usa el día preparado, o la fuente si no hay
+TZ=America/Bogota node herramientas/prueba-audio.js sitio  # audífonos y reconocimiento (18 casos)
 ```
-reference_id: 8d2c17a9b26d4d83888ea67a1ee565b2
-model:        s2.1-pro-free
-formato:      mp3
-```
 
-La app manda el texto a la API de Fish Audio y recibe el audio ya
-generado. **No se descarga ni se instala ningún modelo** en el celular
-ni en el PC — al revés de lo que pasaba con Kokoro, que bajaba ~90 MB y
-además tenía un problema conocido y sin resolver con el español.
+## La voz: local y gratis
 
-Esa voz **nunca se sustituye por otra**: ni por la de por defecto, ni
-por una parecida, ni clonando una nueva. Si Fish Audio responde que esa
-voz no está disponible, la app lo dice tal cual, con el ID original a la
-vista, en vez de cambiar de voz por su cuenta.
+La voz no depende de ninguna API. La genera un modelo que corre en la
+propia máquina de GitHub cada madrugada (ver `herramientas/motores_voz.py`).
 
-### Dónde va la clave de API (y por qué va ahí)
+**Por defecto: Supertonic 3, voz M4** (hombre). Se eligió midiendo, no a
+ojo: se probaron 17 combinaciones de voz y ajustes sobre texto real de
+Laudes, y a cada una se le puso una nota de **naturalidad** con UTMOS
+(un modelo entrenado para imitar cómo califican personas las voces
+sintéticas; 1 = robótica, 5 = humana) y se contaron las **palabras mal**
+transcribiéndolas con Whisper.
 
-Fish Audio necesita una clave de API. Esta app es un **sitio estático y
-público** (GitHub Pages): no tiene servidor propio, así que cualquier
-cosa que estuviera dentro de sus archivos la podría leer cualquiera que
-entre a la URL. Por eso la clave **no está, ni puede estar, en ningún
-archivo del repositorio**.
+| Voz | Naturalidad | Palabras mal |
+|---|---|---|
+| **Supertonic 3 · M4** (por defecto) | **3,79** en la muestra · **3,65** en bloques reales | 1,4–2,8 % |
+| Supertonic 3 · F1 (mujer) | 3,94 | 1,4 % |
+| Kokoro · em_alex (la anterior) | 3,37 · **3,25** en los mismos bloques reales | 2,1 % |
+| Piper (4 voces) | 2,24 – 3,32 | 8,5 – 13,5 % |
 
-En su lugar: entra a Ajustes (⚙ arriba a la derecha durante la oración),
-pega tu clave en "Clave de Fish Audio" y dale a Guardar. Se guarda
-**solo en ese dispositivo** (`localStorage` del navegador), no se sube a
-ningún lado, no se escribe en la consola y no sale hacia ningún sitio
-que no sea `api.fish.audio`. Tendrás que pegarla una vez en el celular y
-una vez en el PC, igual que pasa con los audios de los salmos.
+UTMOS se entrenó sobre todo con inglés: sirve para comparar estas voces
+entre sí, no como nota absoluta. La diferencia se mantuvo al comparar con
+exactamente los mismos bloques reales (3,65 contra 3,25).
 
-Ten en cuenta lo que sí implica: la clave queda en tu navegador, en tu
-dispositivo. Está bien para una app que usas tú; si algún día le pasas
-la app instalada a otra persona en ese mismo dispositivo, esa persona
-podría llegar a la clave. Si eso te preocupa, se puede borrar desde el
-mismo Ajustes con "Borrar la clave de este dispositivo", o montar un
-pequeño proxy propio (una función serverless) que guarde la clave del
-lado del servidor — dímelo y lo armamos.
+Dos hallazgos de ese ajuste: Supertonic mejora mucho con más **pasos de
+refinamiento** (5 pasos → 3,23; 8 → 3,65; 16 → 3,79; 32 ya no mejora), así
+que se usan 16. Y trozos más largos o hablar más rápido no ayudaron.
+
+### Verificación: que no se coma palabras
+
+Supertonic, como varios modelos de este tipo, a veces se come palabras
+(lo documenta el propio proyecto, y pasó en las pruebas con otra voz).
+En una oración eso no se puede permitir, así que **cada trozo generado
+se transcribe con Whisper** y se compara con el texto. Si faltan dos o
+más palabras seguidas, se regenera con otra semilla (hasta 5 intentos).
+Si aun así se las come, ese trozo se lee en dos mitades, cortado en el
+punto o la coma más cercanos al centro: con menos texto de una vez el
+modelo no se salta nada. Probado a propósito: acepta el audio correcto y las
+frases cortas ("Amén." incluido), y rechaza un audio al que le faltan
+2 segundos o el final.
+
+En Laudes completa: 45 trozos, 2 regenerados, ninguno con dudas. Con la
+verificación, generar una hora de oración tarda ~5 minutos en el runner
+de GitHub; una noche normal (~12 minutos de audio nuevo), ~7 minutos.
+
+Licencia de Supertonic: el código es MIT y el modelo **OpenRAIL-M**,
+que permite usarlo gratis, también en apps, con restricciones de uso
+(nada dañino ni engañoso). Nada de eso afecta a una app para rezar.
+
+### Elegir otra voz
+
+Sin tocar código: **Settings → Secrets and variables → Actions →
+Variables → New repository variable**, nombre `MOTOR_VOZ`:
+
+- `supertonic-F1` (mujer, la de mejor nota), o cualquier otra de
+  Supertonic: `supertonic-M1` … `supertonic-M5`, `supertonic-F1` … `F5`.
+- `kokoro` para volver a la anterior.
+- `qwen3-clon`, `omnivoice-clon` o `chatterbox-clon` para los modelos
+  grandes (ver abajo).
+
+Cambiar de voz nunca mezcla audios: el nombre de cada archivo lleva la voz
+que lo generó.
+
+### Probar los modelos grandes
+
+**Qwen3-TTS**, **OmniVoice** y **Chatterbox** (Apache-2.0 / MIT, todos
+corren en CPU) son más pesados y podrían sonar aún más naturales. Sus
+pesos están en Hugging Face, así que se prueban en GitHub:
+
+1. **Actions → "Probar voces locales" → Run workflow.** Genera la misma
+   muestra con cada motor, con la misma verificación de cada noche.
+2. Al terminar, abajo en la página de la ejecución aparece
+   **`muestras-voces`**: se descarga y se abre `comparacion.html`. Las
+   voces salen **ordenadas por naturalidad** (la misma nota UTMOS de la
+   tabla de arriba), con las palabras mal y cuánto tardaría cada una cada
+   noche. Supertonic y Kokoro van incluidas para comparar.
+3. Si alguna gana, se elige con `MOTOR_VOZ`. Las "-clon" repiten una
+   **voz de referencia**: sube `referencia.wav` y `referencia.txt` (vienen
+   en el mismo zip) a una carpeta `voz/` del repositorio.
+
+La voz de referencia la crea Qwen3 a partir de una **descripción con
+palabras** ("hombre, voz grave y cálida, acento latinoamericano neutro,
+lectura pausada, como un sacerdote en una capilla"). No es la voz de
+ninguna persona real.
+
+### Fish Audio (opcional)
+
+Sigue disponible: con `MOTOR_VOZ` = `fish` y el secreto `FISH_API_KEY`,
+el trabajo nocturno usa Fish Audio como antes. Y en la app, en Ajustes →
+**Opciones avanzadas**, quien tenga su propia clave puede usarla para
+días que no estén preparados.
+
+### Dónde va la clave de Fish Audio (si se usa)
+
+Hay **dos sitios** donde puede estar la clave, y ninguno es el código:
+
+- **Para todos (lo normal):** en los *Secrets* del repositorio, donde
+  solo la ve la GitHub Action de madrugada. Quien reza no necesita nada.
+  Es lo explicado arriba.
+- **Solo para ti (opcional):** en Ajustes (⚙ durante la oración) puedes
+  pegar tu propia clave para que la app genere audio al vuelo en días
+  que no estén preparados. Se guarda **solo en ese dispositivo**
+  (`localStorage`), no se sube a ningún lado, no se escribe en la
+  consola y no sale hacia ningún sitio que no sea `api.fish.audio`.
+
+Esta app es un **sitio estático y público**: no tiene servidor propio,
+así que cualquier cosa dentro de sus archivos la podría leer quien entre
+a la URL. Por eso la clave **no está, ni puede estar, en ningún archivo
+del repositorio**.
+
+Sobre la clave personal de Ajustes: queda en tu navegador, en tu
+dispositivo. Está bien para ti; si le pasas ese mismo dispositivo
+desbloqueado a otra persona, podría llegar a ella. Se borra desde el
+mismo Ajustes con "Borrar la clave de este dispositivo". Para tus amigos
+no hace falta: ellos usan el audio ya preparado.
 
 ### Caché: no se pide dos veces lo mismo
 
@@ -220,14 +448,16 @@ silencio entre una y otra.
 
 ### Si la voz falla
 
-La app **nunca se queda muda**: si no hay clave puesta, no hay internet
-o la API falla, cae a la voz del sistema — pero el motivo queda escrito
+La app **nunca se queda muda**. El orden es: audio pregenerado del día →
+tu clave personal si la pusiste → voz del sistema. Si no hay nada de lo
+anterior, no hay internet o la API falla, cae a la voz del sistema — pero el motivo queda escrito
 en la línea de estado de Ajustes, nunca en silencio. Los estados
 posibles son: activa, falta la clave, clave rechazada, sin cuota, voz no
 disponible, sin conexión, o error de la API con su detalle.
 
 Y lo más útil para saber a qué atenerse: esa línea **dice quién habló de
-verdad la última vez**. Si algo suena robótico y ahí pone "ojo: lo
+verdad la última vez** — audio pregenerado, Fish Audio en directo, o la
+voz del sistema. Si algo suena robótico y ahí pone "ojo: lo
 último que sonó fue la voz del sistema, no Fish Audio", el problema no
 es el modelo — es que Fish Audio no llegó a sonar, y el resto de la
 línea dice por qué.

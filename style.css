@@ -553,3 +553,53 @@ input:focus-visible {
   .pantalla { padding-top: 56px; }
   .oracion-texto { font-size: clamp(26px, 3vw, 38px); }
 }
+
+/* Elegir micrófono (Ajustes) */
+.fila-mic {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fila-mic[hidden] { display: none; }
+
+#select-mic {
+  font-family: inherit;
+  font-size: 14px;
+  padding: 8px 10px;
+  color: var(--tinta);
+  background: transparent;
+  border: 1px solid var(--linea);
+  border-radius: 4px;
+  max-width: 100%;
+}
+
+#select-mic:focus { outline: none; border-color: var(--rubrica); }
+
+.nota-importante {
+  color: var(--rubrica);
+  font-weight: 500;
+}
+
+/* Botón 🔊 cuando el audio quedó en pausa y sirve para seguir */
+.btn-secundario.es-reanudar {
+  border-color: var(--rubrica);
+  color: var(--rubrica);
+  font-weight: 600;
+}
+
+/* Opciones avanzadas (voz en vivo con clave propia) */
+.avanzado {
+  border-top: 1px solid var(--linea);
+  padding-top: 10px;
+}
+.avanzado summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--tinta-suave);
+}
+.avanzado[open] {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}

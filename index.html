@@ -16,6 +16,10 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;0,8..60,600;1,8..60,400;1,8..60,500&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="style.css" />
+<script src="liturgia.js" defer></script>
+<script src="voz-comun.js" defer></script>
+<script src="reproductor.js" defer></script>
+<script src="voz-previa.js" defer></script>
 <script src="voz-fish.js" defer></script>
 </head>
 <body>
@@ -85,15 +89,7 @@
     </div>
 
     <div id="panel-config" class="panel-config" hidden>
-      <p id="estado-voz" class="nota-reconocer">Voz Fish Audio: en espera.</p>
-
-      <label for="campo-clave-voz">Clave de Fish Audio (solo en este dispositivo)</label>
-      <div class="fila-clave">
-        <input type="password" id="campo-clave-voz" autocomplete="off" spellcheck="false"
-               placeholder="Pega aquí tu clave de Fish Audio" />
-        <button id="btn-guardar-clave-voz" type="button" class="btn-texto">Guardar</button>
-      </div>
-      <button id="btn-borrar-clave-voz" type="button" class="btn-link" hidden>Borrar la clave de este dispositivo</button>
+      <p id="estado-voz" class="nota-reconocer">Voz: preparada para este día.</p>
 
       <label for="rango-velocidad">Velocidad de lectura</label>
       <input type="range" id="rango-velocidad" min="0.7" max="1.3" step="0.02" value="1" />
@@ -107,6 +103,25 @@
       </label>
       <p id="nota-reconocer" class="nota-reconocer" hidden></p>
       <button id="btn-activar-mic" type="button" class="btn-link">Activar micrófono ahora</button>
+      <div id="fila-mic" class="fila-mic">
+        <label for="select-mic">Micrófono para reconocer</label>
+        <select id="select-mic">
+          <option value="">El predeterminado del sistema</option>
+        </select>
+        <p id="nota-mic" class="nota-reconocer">Con audífonos Bluetooth, elige aquí el micrófono del computador o del celular: así los audífonos no pasan a "modo llamada" y el audio no se corta.</p>
+      </div>
+
+      <details class="avanzado">
+        <summary>Opciones avanzadas</summary>
+        <p class="nota-reconocer">Voz en vivo con Fish Audio para días que no estén preparados. Solo si tienes tu propia clave; no hace falta para rezar.</p>
+        <label for="campo-clave-voz">Clave de Fish Audio (solo en este dispositivo)</label>
+        <div class="fila-clave">
+          <input type="password" id="campo-clave-voz" autocomplete="off" spellcheck="false"
+                 placeholder="Pega aquí tu clave de Fish Audio" />
+          <button id="btn-guardar-clave-voz" type="button" class="btn-texto">Guardar</button>
+        </div>
+        <button id="btn-borrar-clave-voz" type="button" class="btn-link" hidden>Borrar la clave de este dispositivo</button>
+      </details>
     </div>
 
     <main class="oracion-cuerpo">

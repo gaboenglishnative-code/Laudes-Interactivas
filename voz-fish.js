@@ -20,16 +20,18 @@
 (function () {
   'use strict';
 
-  const API_URL = 'https://api.fish.audio/v1/tts';
-  const VOICE_ID = '8d2c17a9b26d4d83888ea67a1ee565b2';
-  const MODEL = 's2.1-pro-free';
-  const FORMAT = 'mp3';
+  const VC = window.VozComun;
+
+  const API_URL = VC.API_URL;
+  const VOICE_ID = VC.VOICE_ID;
+  const MODEL = VC.MODEL;
 
   const CLAVE_LS = 'rezar_fish_key';
 
   // Mensaje exacto pedido para el caso de voz no disponible.
-  const MSG_VOZ_NO_DISPONIBLE =
-    'La voz ' + VOICE_ID + ' no está disponible para esta llamada.';
+  const MSG_VOZ_NO_DISPONIBLE = VC.MSG_VOZ_NO_DISPONIBLE;
+
+  const normalizarVelocidad = VC.normalizarVelocidad;
 
   // -------------------------------------------------------------------
   // Estado visible (Ajustes lo muestra; app.js escucha 'vozfish-estado')
@@ -118,14 +120,6 @@
       throw err;
     });
     return promesaDB;
-  }
-
-  function normalizarVelocidad(velocidad) {
-    const v = Number(velocidad);
-    if (!v || v <= 0) return 1;
-    // Fish Audio acepta de 0.5 a 2.0; se redondea a dos decimales para
-    // que la caché no se llene de variantes casi idénticas.
-    return Math.round(Math.min(2, Math.max(0.5, v)) * 100) / 100;
   }
 
   function claveDeTexto(texto, velocidad) {
@@ -222,13 +216,6 @@
   // Llamada a la API
   // -------------------------------------------------------------------
 
-  function errorDeVoz() {
-    const err = new Error(MSG_VOZ_NO_DISPONIBLE);
-    err.vozNoDisponible = true;
-    err.referenceId = VOICE_ID; // se conserva el ID original para diagnóstico
-    return err;
-  }
-
   async function pedirAFishAudio(texto, velocidad) {
     const apiKey = obtenerClave();
     if (!apiKey) {
@@ -240,36 +227,8 @@
     try {
       respuesta = await fetch(API_URL, {
         method: 'POST',
-        headers: {
-          'Authorization': 'Bearer ' + apiKey,
-          'Content-Type': 'application/json',
-          'model': MODEL
-        },
-        body: JSON.stringify({
-          text: texto,
-          reference_id: VOICE_ID,
-          format: FORMAT,
-
-          // Esto es lo que hace que un párrafo suene a párrafo y no a
-          // frases sueltas pegadas. El modelo parte el texto en trozos
-          // internos de hasta 300 caracteres, pero con
-          // condition_on_previous_chunks usa el audio ya generado como
-          // contexto del siguiente, así que la entonación sigue de
-          // corrido a lo largo de todo el bloque. Solo funciona dentro
-          // de UNA llamada: por eso hay que mandarle el párrafo entero
-          // de una vez y no frase por frase.
-          chunk_length: 300,
-          condition_on_previous_chunks: true,
-
-          // 'normal' es la mejor calidad (las otras opciones bajan
-          // latencia a costa de calidad).
-          latency: 'normal',
-          normalize: true,
-
-          // La velocidad la genera el modelo, no se fuerza después
-          // acelerando el audio: así no suena a cinta mal puesta.
-          prosody: { speed: normalizarVelocidad(velocidad) }
-        })
+        headers: VC.cabeceras(apiKey),
+        body: JSON.stringify(VC.cuerpoPeticion(texto, velocidad))
       });
     } catch (err) {
       // Sin red, o el navegador bloqueó la petición (CORS).
@@ -285,28 +244,21 @@
       let detalle = '';
       try { detalle = (await respuesta.text()).slice(0, 300); } catch (e) { /* nada */ }
 
-      if (respuesta.status === 401 || respuesta.status === 403) {
-        const e = new Error('Fish Audio rechazó la clave de API (revísala en Ajustes).');
-        e.claveInvalida = true;
-        actualizarEstado('error-clave', e);
-        throw e;
-      }
+      const fallo = VC.clasificarError(respuesta.status, detalle);
+      const e = new Error(fallo.mensaje);
 
-      if (respuesta.status === 402) {
-        const e = new Error('La cuenta de Fish Audio no tiene saldo o cuota disponible.');
-        actualizarEstado('error-cuota', e);
-        throw e;
-      }
-
-      // Error referido a la voz: se informa tal cual, sin sustituirla
-      // por ninguna otra y sin elegir una "parecida".
-      if (respuesta.status === 404 || /reference|voice|model/i.test(detalle)) {
-        const e = errorDeVoz();
+      if (fallo.clase === 'voz') {
+        // Se conserva el ID original para diagnóstico; nunca se cambia
+        // de voz por nuestra cuenta.
+        e.vozNoDisponible = true;
+        e.referenceId = VOICE_ID;
         actualizarEstado('error-voz', e);
         throw e;
       }
 
-      const e = new Error('Fish Audio respondió con un error ' + respuesta.status + '.');
+      if (fallo.clase === 'clave') { e.claveInvalida = true; actualizarEstado('error-clave', e); throw e; }
+      if (fallo.clase === 'cuota') { actualizarEstado('error-cuota', e); throw e; }
+
       actualizarEstado('error-api', e);
       throw e;
     }
@@ -362,27 +314,20 @@
   // Reproducción
   // -------------------------------------------------------------------
 
-  let audioEl = null;
   let urlObjetoActual = null;
   let generacion = 0;
 
-  function obtenerAudioEl() {
-    if (!audioEl) {
-      audioEl = document.getElementById('reproductor-voz') || new Audio();
-    }
-    return audioEl;
-  }
-
-  function detener() {
-    generacion++;
-    const el = obtenerAudioEl();
-    try { el.pause(); } catch (e) { /* nada */ }
-    el.onended = null;
-    el.onerror = null;
+  function soltarUrl() {
     if (urlObjetoActual) {
       URL.revokeObjectURL(urlObjetoActual);
       urlObjetoActual = null;
     }
+  }
+
+  function detener() {
+    generacion++;
+    if (window.Reproductor) window.Reproductor.detener();
+    soltarUrl();
   }
 
   async function hablar(texto, opciones) {
@@ -397,22 +342,14 @@
     if (miGeneracion !== generacion) return;
 
     urlObjetoActual = URL.createObjectURL(blob);
-    const el = obtenerAudioEl();
-    el.src = urlObjetoActual;
 
-    // playbackRate se queda en 1 a propósito: acelerar o frenar el audio
-    // ya generado lo hace sonar artificial. La velocidad se le pidió al
-    // modelo en prosody.speed, que la genera bien de entrada.
-    el.playbackRate = 1;
-
-    if (opciones.alEmpezar) {
-      try { opciones.alEmpezar(); } catch (e) { /* nada */ }
-    }
-
-    return new Promise((resolve) => {
-      el.onended = resolve;
-      el.onerror = resolve;
-      el.play().catch(resolve);
+    // playbackRate en 1 a propósito: la velocidad ya se le pidió al
+    // modelo (prosody.speed). Antes, si play() fallaba aquí, se daba por
+    // terminado y la app saltaba el texto sin leerlo; ahora el
+    // Reproductor lo deja en pausa y avisa.
+    return window.Reproductor.reproducir(urlObjetoActual, {
+      velocidad: 1,
+      alEmpezar: opciones.alEmpezar
     });
   }
 

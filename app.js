@@ -2,307 +2,20 @@
   'use strict';
 
   // ---------------------------------------------------------------------
-  // Configuración de horas y construcción de URL a la fuente original.
-  // La fuente (liturgiadelashoras.github.io) es un sitio estático: cada
-  // hora litúrgica vive en un archivo .htm fijo por fecha. Leemos ese
-  // mismo HTML directamente desde el repositorio en GitHub (que sí envía
-  // cabeceras CORS), así que no hace falta ninguna extensión ni inyectar
-  // nada en la página original.
+  // El parser, las URLs de la fuente y la construcción de frases y
+  // bloques viven en liturgia.js, NO aquí. Ese mismo archivo lo carga el
+  // generador nocturno que prepara el audio (herramientas/generar-dia.js),
+  // así que navegador y generador producen exactamente el mismo texto.
+  // Si estuviera duplicado, cualquier arreglo en un lado dejaría al otro
+  // generando audio que ya no corresponde con lo que se muestra.
   // ---------------------------------------------------------------------
 
-  const MESES = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+  const L = window.Liturgia;
 
-  const HORAS = [
-    { id: 'oficio',    nombre: 'Oficio de Lectura', memento: 'Meditación pausada, a cualquier hora' },
-    { id: 'laudes',    nombre: 'Laudes',            memento: 'Oración de la mañana' },
-    { id: 'tercia',    nombre: 'Tercia',            memento: 'Media mañana' },
-    { id: 'sexta',     nombre: 'Sexta',             memento: 'Mediodía' },
-    { id: 'nona',      nombre: 'Nona',              memento: 'Media tarde' },
-    { id: 'visperas',  nombre: 'Vísperas',          memento: 'Oración de la tarde' },
-    { id: 'completas', nombre: 'Completas',         memento: 'Antes de dormir' }
-  ];
-
-  const REPO_BASE = 'https://raw.githubusercontent.com/liturgiadelashoras/liturgiadelashoras.github.io/master/sync';
-
-  function construirCarpetaFecha(fecha) {
-    const y = fecha.getFullYear();
-    const m = MESES[fecha.getMonth()];
-    const d = String(fecha.getDate()).padStart(2, '0');
-    return `${REPO_BASE}/${y}/${m}/${d}`;
-  }
-
-  function construirUrl(fecha, horaId) {
-    return `${construirCarpetaFecha(fecha)}/${horaId}.htm`;
-  }
-
-  function fechaISO(fecha) {
-    const y = fecha.getFullYear();
-    const m = String(fecha.getMonth() + 1).padStart(2, '0');
-    const d = String(fecha.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  }
-
-  // ---------------------------------------------------------------------
-  // Parser: convierte el HTML crudo de la fuente en una lista de pasos.
-  // La fuente usa <FONT COLOR="#FF0000"> para rúbricas/etiquetas (V., R.,
-  // Ant., títulos de sección) y <FONT COLOR="#000000"> para el texto que
-  // se reza. Reconstruimos las líneas a partir de los <BR> respetando
-  // ese color heredado.
-  // ---------------------------------------------------------------------
-
-  function normalizarEspacios(texto) {
-    return texto.replace(/\u00a0/g, ' ').replace(/[ \t\r\n]+/g, ' ').trim();
-  }
-
-  // ---------------------------------------------------------------------
-  // Algunos días (fiestas que aplican solo en ciertos países, o que se
-  // pueden sustituir por la feria) no tienen el archivo de la hora
-  // directamente: en vez de eso, la carpeta del día trae un "index.htm"
-  // que ofrece 2 o más carpetas numeradas (1/, 2/...) para elegir. Si
-  // pasa eso, lo detectamos y, si hay más de una opción real, se la
-  // preguntamos al usuario.
-  // ---------------------------------------------------------------------
-
-  function detectarOpcionesDelDia(doc) {
-    const cuerpo = doc.getElementById('cuerpo') || doc.body;
-    if (!cuerpo) return [];
-
-    const anclas = Array.from(cuerpo.querySelectorAll('a[href]')).filter((a) =>
-      /^\d+\/index\.htm$/i.test((a.getAttribute('href') || '').trim())
-    );
-
-    return anclas.map((a) => {
-      const numero = a.getAttribute('href').trim().match(/^(\d+)\//)[1];
-      const contenedor = a.closest('li') || a.parentElement;
-      let etiqueta = normalizarEspacios(contenedor.textContent).replace(
-        /haga\s*click\s*aqu[ií]\.?/i,
-        ''
-      ).trim();
-
-      const ul = a.closest('ul');
-      if (ul && ul.previousElementSibling) {
-        const grupo = normalizarEspacios(ul.previousElementSibling.textContent);
-        if (grupo) etiqueta = `${grupo} — ${etiqueta}`;
-      }
-
-      return { numero, etiqueta: etiqueta || `Opción ${numero}` };
-    });
-  }
-
-  async function obtenerHTMLHora(hora, opcion) {
-    const url = opcion
-      ? `${construirCarpetaFecha(estado.fechaSeleccionada)}/${opcion}/${hora.id}.htm`
-      : construirUrl(estado.fechaSeleccionada, hora.id);
-
-    const resp = await fetch(url, { cache: 'no-store' });
-    if (resp.ok) return resp.text();
-
-    if (opcion) throw new Error('no-encontrado');
-
-    const urlIndice = `${construirCarpetaFecha(estado.fechaSeleccionada)}/index.htm`;
-    const respIndice = await fetch(urlIndice, { cache: 'no-store' });
-    if (!respIndice.ok) throw new Error('no-encontrado');
-
-    const htmlIndice = await respIndice.text();
-    const doc = new DOMParser().parseFromString(htmlIndice, 'text/html');
-    const opciones = detectarOpcionesDelDia(doc);
-
-    if (!opciones.length) throw new Error('no-encontrado');
-    if (opciones.length === 1) return obtenerHTMLHora(hora, opciones[0].numero);
-
-    const error = new Error('multiples-opciones');
-    error.opciones = opciones;
-    throw error;
-  }
-
-  function extraerLineas(cuerpo) {
-    const lineas = [];
-    let actual = [];
-
-    function cerrarLinea() {
-      lineas.push(actual);
-      actual = [];
-    }
-
-    function walk(nodo, color) {
-      if (nodo.nodeType === Node.TEXT_NODE) {
-        const texto = normalizarEspacios(nodo.textContent);
-        if (texto) actual.push({ texto, color });
-        return;
-      }
-      if (nodo.nodeType !== Node.ELEMENT_NODE) return;
-
-      const tag = nodo.tagName;
-      // Los <A> en esta fuente solo son botones de tamaño de letra y la
-      // barra de navegación entre horas — nunca texto de la oración.
-      if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'A') return;
-
-      if (tag === 'BR') {
-        cerrarLinea();
-        return;
-      }
-
-      let colorHijos = color;
-      if (tag === 'FONT') {
-        const attrColor = (nodo.getAttribute('color') || '').toUpperCase();
-        if (attrColor === '#FF0000') colorHijos = 'rojo';
-        else if (attrColor === '#000000') colorHijos = 'negro';
-      }
-
-      for (const hijo of nodo.childNodes) {
-        walk(hijo, colorHijos);
-      }
-    }
-
-    walk(cuerpo, 'negro');
-    cerrarLinea();
-    return lineas;
-  }
-
-  function fusionarRuns(runs) {
-    const fusion = [];
-    for (const run of runs) {
-      const ultimo = fusion[fusion.length - 1];
-      if (ultimo && ultimo.color === run.color) {
-        ultimo.texto = normalizarEspacios(ultimo.texto + ' ' + run.texto);
-      } else {
-        fusion.push({ texto: run.texto, color: run.color });
-      }
-    }
-    return fusion;
-  }
-
-  const RE_V = /^V\.?$/i;
-  const RE_R = /^R\.?$/i;
-  const RE_ANT = /^Ant\.?\s*\d*\.?$/i;
-
-  function clasificarLinea(runsCrudos) {
-    const runs = fusionarRuns(runsCrudos.filter(r => r.texto));
-    if (!runs.length) return null;
-
-    const primero = runs[0];
-
-    if (primero.color === 'rojo') {
-      if (RE_V.test(primero.texto)) {
-        const texto = normalizarEspacios(runs.slice(1).map(r => r.texto).join(' '));
-        if (!texto) return null;
-        return { tipo: 'voz', etiqueta: 'Guía', texto };
-      }
-      if (RE_R.test(primero.texto)) {
-        const texto = normalizarEspacios(runs.slice(1).map(r => r.texto).join(' '));
-        if (!texto) return null;
-        return { tipo: 'respuesta', etiqueta: 'Responde tú', texto };
-      }
-      if (RE_ANT.test(primero.texto)) {
-        const texto = normalizarEspacios(runs.slice(1).map(r => r.texto).join(' '));
-        if (!texto) return null;
-        return { tipo: 'antifona', etiqueta: 'Antífona', texto };
-      }
-    }
-
-    const todosRojos = runs.every(r => r.color === 'rojo');
-    const textoCompleto = normalizarEspacios(runs.map(r => r.texto).join(' '));
-    if (!textoCompleto) return null;
-
-    if (todosRojos) {
-      return { tipo: 'titulo', etiqueta: 'Sección', texto: textoCompleto };
-    }
-
-    return { tipo: 'lectura', etiqueta: 'Se reza', texto: textoCompleto };
-  }
-
-  function parsearLiturgia(html) {
-    const doc = new DOMParser().parseFromString(html, 'text/html');
-    const cuerpo = doc.getElementById('cuerpo') || doc.body;
-    if (!cuerpo) return [];
-
-    const lineas = extraerLineas(cuerpo);
-    const pasos = [];
-    for (const linea of lineas) {
-      const paso = clasificarLinea(linea);
-      if (paso) pasos.push(paso);
-    }
-    return pasos;
-  }
-
-  // ---------------------------------------------------------------------
-  // Agrupa líneas de lectura consecutivas (versos de un salmo, líneas de
-  // un párrafo largo) en un solo paso "de párrafo entero", en vez de uno
-  // por cada línea del HTML original. Esto es solo para la PANTALLA y
-  // para saber cuándo avanzar solo: cada paso agrupado guarda también sus
-  // "partes" originales por separado, así que al leerlo en voz alta se
-  // dicen en secuencia, una tras otra, sin que el usuario tenga que darle
-  // "Continuar" entre cada línea — ver hablarPartes() más abajo.
-  // ---------------------------------------------------------------------
-
-  function agruparLecturasEnParrafos(pasos) {
-    const agrupado = [];
-    let bufer = null;
-
-    for (const paso of pasos) {
-      if (paso.tipo === 'lectura') {
-        if (!bufer) {
-          bufer = { tipo: 'lectura', etiqueta: paso.etiqueta, texto: paso.texto, partes: [paso.texto] };
-          agrupado.push(bufer);
-        } else {
-          bufer.partes.push(paso.texto);
-          // Un solo salto de línea entre versos: así el bloque se ve
-          // como se ve en el breviario (verso bajo verso) en vez de con
-          // una línea en blanco entre cada renglón.
-          bufer.texto += '\n' + paso.texto;
-        }
-      } else {
-        bufer = null;
-        agrupado.push(paso);
-      }
-    }
-
-    return agrupado;
-  }
-
-  // ---------------------------------------------------------------------
-  // Piezas cantables: detecta títulos de Salmo / Cántico / Himno y agrupa
-  // los versos (pasos tipo 'lectura') que le siguen, para poder
-  // reemplazarlos por un audio propio cuando el usuario lo asigne.
-  // La clave se calcula a partir del propio título, así que un salmo que
-  // ya asignaste se reconoce solo la próxima vez que vuelva a aparecer
-  // (el salterio rota cada 4 semanas, así que sí se repite tal cual).
-  // ---------------------------------------------------------------------
-
-  const RE_PIEZA = /^(Salmo|C[áa]ntico|Himno)\b/i;
-
-  function normalizarClave(texto) {
-    return texto
-      .toLowerCase()
-      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 70);
-  }
-
-  function marcarPiezasCantables(pasos) {
-    for (let i = 0; i < pasos.length; i++) {
-      const paso = pasos[i];
-      if (paso.tipo !== 'titulo' || !RE_PIEZA.test(paso.texto)) continue;
-
-      let fin = i;
-      let j = i + 1;
-      while (j < pasos.length && pasos[j].tipo === 'lectura') {
-        fin = j;
-        j++;
-      }
-
-      // Si no le sigue ningún verso (p. ej. "CÁNTICO EVANGÉLICO" es solo
-      // un anuncio, el texto real viene más abajo), no hay nada que
-      // reemplazar por audio: no se marca como pieza.
-      if (fin > i) {
-        paso.pieza = {
-          slug: normalizarClave(paso.texto),
-          indiceFinVersos: fin
-        };
-      }
-    }
-  }
+  const HORAS = L.HORAS;
+  const fechaISO = L.fechaISO;
+  const frasesDelPaso = L.frasesDelPaso;
+  const agruparEnBloques = L.agruparEnBloques;
 
   // ---------------------------------------------------------------------
   // Audios incluidos con la app: el Benedictus (Cántico de Zacarías, al
@@ -454,6 +167,10 @@
   // para que la app nunca se quede muda — pero el motivo queda escrito
   // en la línea de estado de Ajustes, nunca en silencio.
   function hablar(texto, alTerminar, opciones) {
+    cuandoMicLibre(() => hablarYa(texto, alTerminar, opciones));
+  }
+
+  function hablarYa(texto, alTerminar, opciones) {
     opciones = opciones || {};
 
     if (window.VozFish && window.VozFish.tieneClave()) {
@@ -500,126 +217,65 @@
     if (espanola) utter.voice = espanola;
 
     let resuelto = false;
+    let vigilante = null;
     const resolver = () => {
       if (resuelto) return;
       resuelto = true;
+      clearTimeout(vigilante);
       if (alTerminar) alTerminar();
     };
 
     utter.onend = resolver;
     utter.onerror = resolver;
 
+    // Vigilante: la voz del sistema en Android (sobre todo con audífonos
+    // Bluetooth) a veces nunca avisa que terminó, y la app se quedaba
+    // esperando para siempre. Si tarda mucho más de lo que debería, se da
+    // por terminada. ~12 caracteres por segundo a velocidad normal.
+    const esperado = (texto.length / 12) / (voz.tasa || 1);
+    vigilante = setTimeout(() => {
+      if (resuelto) return;
+      try { speechSynthesis.cancel(); } catch (e) { /* nada */ }
+      resolver();
+    }, Math.max(4000, esperado * 2000 + 2500));
+
     speechSynthesis.speak(utter);
   }
 
   function detenerVoz() {
+    if (window.VozPrevia) window.VozPrevia.detener();
     if (window.VozFish) window.VozFish.detener();
     if ('speechSynthesis' in window) speechSynthesis.cancel();
   }
 
   // ---------------------------------------------------------------------
-  // Frases de verdad, no renglones
+  // Qué se le manda a la voz, y en qué tamaño
   //
-  // El HTML de la fuente corta los salmos y las lecturas en renglones
-  // cortos por motivos tipográficos, no gramaticales: un mismo versículo
-  // puede venir partido en tres líneas. Antes se leía una línea por
-  // llamada a la voz, así que en cada salto de renglón había un corte
-  // seco, como si fuera punto y aparte — justo en mitad de una frase.
+  // construirFrases() y agruparEnBloques() están en liturgia.js. La
+  // diferencia está en el tamaño según quién hable:
   //
-  // Aquí se vuelven a pegar los renglones seguidos hasta encontrar un
-  // final de frase real (punto, signo de admiración o de interrogación,
-  // puntos suspensivos, incluso si van dentro de comillas o paréntesis).
-  // Lo que queda es una frase completa por llamada, así que la voz solo
-  // se detiene donde el texto realmente se detiene. La coma, el punto y
-  // coma y los dos puntos NO cortan: la propia voz les da su pausa
-  // natural dentro de la misma frase.
+  //  - Fish Audio recibe el BLOQUE entero (salmo o párrafo completo). Un
+  //    modelo neuronal decide la entonación mirando todo el texto que le
+  //    entra de una vez; con frases sueltas cada una le llega sin
+  //    contexto y suena plana. Internamente parte en trozos de 300
+  //    caracteres, pero con condition_on_previous_chunks encadena la
+  //    entonación — y eso solo pasa dentro de UNA llamada.
   //
-  // Esto es solo para leer en voz alta: en pantalla los renglones se
-  // siguen viendo tal como vienen.
+  //  - La voz del sistema recibe FRASES sueltas, porque Android corta
+  //    los textos largos.
   // ---------------------------------------------------------------------
 
-  const RE_FIN_FRASE = /[.!?…][)\]"'»”’\s]*$/;
-  const LARGO_MAX_FRASE = 700;
-
-  function construirFrases(partes) {
-    const frases = [];
-    let actual = '';
-
-    for (const cruda of partes) {
-      const parte = String(cruda == null ? '' : cruda).trim();
-      if (!parte) continue;
-
-      actual = actual ? actual + ' ' + parte : parte;
-
-      // Se cierra la frase en un final de frase de verdad, o si ya se
-      // hizo muy larga (para que se pueda parar y avanzar sin esperar un
-      // bloque enorme).
-      if (RE_FIN_FRASE.test(parte) || actual.length >= LARGO_MAX_FRASE) {
-        frases.push(actual);
-        actual = '';
-      }
-    }
-
-    if (actual) frases.push(actual);
-    return frases;
-  }
-
-  function frasesDelPaso(paso) {
-    if (!paso) return [];
-    if (paso.frases) return paso.frases;
-
-    const partes = (paso.partes && paso.partes.length)
-      ? paso.partes
-      : String(paso.texto || '').split('\n');
-
-    paso.frases = construirFrases(partes);
-    return paso.frases;
-  }
-
-  // ---------------------------------------------------------------------
-  // Bloques: por qué se le manda el párrafo ENTERO al modelo
-  //
-  // Un modelo de voz neuronal decide la entonación mirando todo el texto
-  // que le entra de una vez: dónde subir, dónde apoyar, cómo enlazar una
-  // frase con la siguiente. Si se le mandan frases sueltas, una por
-  // llamada, cada frase le llega sin contexto y la lee como si fuera la
-  // única que existe — tono plano, punto final en cada una. Eso es lo
-  // que suena robótico, y era culpa nuestra, no del modelo.
-  //
-  // Fish Audio parte el texto internamente en trozos de hasta 300
-  // caracteres, pero con condition_on_previous_chunks cada trozo usa el
-  // audio anterior como contexto y la entonación sigue de corrido. Eso
-  // solo pasa DENTRO de una misma llamada. Así que ahora va el bloque
-  // entero (salmo, párrafo, lectura) en una sola petición.
-  //
-  // Con la voz del sistema es al revés: Android corta los textos largos,
-  // así que ahí se sigue yendo frase por frase.
-  // ---------------------------------------------------------------------
-
-  const LARGO_MAX_BLOQUE = 2500;
-
-  function agruparEnBloques(frases) {
-    const bloques = [];
-    let actual = '';
-
-    for (const frase of frases) {
-      if (!actual) {
-        actual = frase;
-        continue;
-      }
-      if (actual.length + 1 + frase.length > LARGO_MAX_BLOQUE) {
-        bloques.push(actual);
-        actual = frase;
-      } else {
-        actual += ' ' + frase;
-      }
-    }
-
-    if (actual) bloques.push(actual);
-    return bloques;
+  // ¿Este paso ya trae su audio hecho por el generador nocturno?
+  function tienePregenerado(paso) {
+    return !!(window.VozPrevia && paso && paso.audios && paso.audios.length);
   }
 
   function trozosDelPaso(paso) {
+    // Con audio pregenerado, los trozos son los bloques — que es como
+    // los partió el generador, así que paso.audios[i] corresponde a
+    // trozos[i]. Sin él, depende de quién vaya a hablar.
+    if (tienePregenerado(paso)) return L.bloquesDelPaso(paso);
+
     const frases = frasesDelPaso(paso);
     if (!frases.length) return [];
 
@@ -628,15 +284,18 @@
   }
 
   // Adelanta el audio del paso siguiente mientras el usuario todavía
-  // está en este, para que al avanzar empiece al instante en vez de
-  // esperar a que el modelo lo genere.
+  // está en este, para que al avanzar empiece al instante.
   function precalentarPasoSiguiente() {
-    if (!window.VozFish || !window.VozFish.tieneClave()) return;
-
     const siguiente = estado.pasos[estado.indice + 1];
     if (!siguiente) return;
     if (siguiente.tipo === 'titulo' || siguiente.pieza) return;
 
+    if (tienePregenerado(siguiente)) {
+      window.VozPrevia.precalentar(siguiente.audios[0]);
+      return;
+    }
+
+    if (!window.VozFish || !window.VozFish.tieneClave()) return;
     const trozos = trozosDelPaso(siguiente);
     if (trozos.length) window.VozFish.precalentar(trozos[0], voz.tasa);
   }
@@ -659,8 +318,11 @@
     // estado en las lecturas: en una respuesta o una antífona ahí dice
     // lo que le toca hacer al usuario y no se debe pisar.
     const mandaEnElEstado = paso && paso.tipo === 'lectura';
+    const pregenerado = tienePregenerado(paso);
 
-    if (mandaEnElEstado && window.VozFish && window.VozFish.tieneClave()) {
+    // Solo se avisa cuando de verdad hay que esperar a que el modelo
+    // genere. Con audio pregenerado no hay espera: es un mp3 más.
+    if (mandaEnElEstado && !pregenerado && window.VozFish && window.VozFish.tieneClave()) {
       el.estado.textContent = 'Preparando la voz…';
     }
 
@@ -681,12 +343,28 @@
         return;
       }
 
+      const indice = i;
       const trozo = trozos[i++];
 
       // Si el bloque fue tan largo que hubo que partirlo, se va pidiendo
       // el siguiente pedazo mientras suena este.
-      if (window.VozFish && i < trozos.length) {
-        window.VozFish.precalentar(trozos[i], voz.tasa);
+      if (i < trozos.length) {
+        if (pregenerado) window.VozPrevia.precalentar(paso.audios[i]);
+        else if (window.VozFish) window.VozFish.precalentar(trozos[i], voz.tasa);
+      }
+
+      // Audio ya hecho: se reproduce tal cual, sin llamar a ninguna API
+      // ni necesitar clave. Si ese archivo faltara o no cargara, se cae
+      // al camino normal en vez de saltarse el texto.
+      const url = pregenerado ? paso.audios[indice] : null;
+      if (url) {
+        cuandoMicLibre(() => {
+          window.VozPrevia
+            .hablar(url, { velocidad: voz.tasa, alEmpezar: () => { voz.ultimoMotor = 'pregenerado'; alEmpezar(); } })
+            .then(siguiente)
+            .catch(() => hablar(trozo, siguiente, { alEmpezar }));
+        });
+        return;
       }
 
       hablar(trozo, siguiente, { alEmpezar });
@@ -701,138 +379,340 @@
   // navegador no lo soporta (Safari de iPhone, por ejemplo) o si el
   // usuario no da permiso de micrófono, simplemente se sigue usando el
   // botón manual, que nunca desaparece.
+  //
+  // Por qué "a veces sí y a veces no" reconocía, y qué cambió:
+  //
+  //  1. Solo se comparaba el ÚLTIMO fragmento oído. Si el usuario hacía
+  //     una pausa a mitad de la antífona (lo natural en una coma o un
+  //     punto), el reconocedor la partía en dos, y la segunda mitad sola
+  //     nunca llegaba al 60 %. Ahora se acumula todo lo dicho en el turno.
+  //  2. En Android el reconocedor se corta solo tras cada frase aunque se
+  //     le pida modo continuo, y al reiniciarlo se perdía lo ya dicho.
+  //     Ahora lo oído en cada sesión se guarda antes de reiniciar.
+  //  3. Se escuchaba en español de España siempre. Ahora se usa la región
+  //     del usuario (español de Colombia en Bogotá, de México en CDMX...),
+  //     que reconoce mucho mejor su acento.
+  //  4. Al pasar de turno se usaba stop(), que todavía entrega lo último
+  //     que oyó — y eso llegaba como si fuera la respuesta del turno
+  //     siguiente. Ahora se usa abort() y cada sesión sabe de qué turno es.
+  //  5. Se toleran palabras casi iguales ("misericordias" por
+  //     "misericordia"), que el reconocedor confunde a menudo.
   // ---------------------------------------------------------------------
 
   const CtorReconocimiento = window.SpeechRecognition || window.webkitSpeechRecognition;
   const SOPORTA_RECONOCIMIENTO = !!CtorReconocimiento;
 
-  // Un solo reconocedor para TODA la sesión, creado la primera vez que
-  // hace falta y reutilizado siempre después. Antes se creaba uno nuevo
-  // en cada turno (cada "Ant." o "R."), y eso es lo que hacía que varios
-  // navegadores volvieran a pedir permiso de micrófono una y otra vez:
-  // cada objeto SpeechRecognition nuevo dispara su propia verificación
-  // de permiso. Con un solo objeto, el permiso se concede una vez y se
-  // reutiliza el resto de la sesión.
-  let reconocedorGlobal = null;
-  let reconociendoActivo = false;
-  let expectativaActual = null; // { texto, callback } del turno que se está esperando
+  // Cuánto se espera, tras cerrar el micrófono, antes de volver a hablar.
+  // Al abrir el micrófono, los audífonos Bluetooth pasan a "modo llamada"
+  // (en Windows, la salida estéreo incluso se queda muda), y al cerrarlo
+  // tardan un momento en volver al modo normal. Si el audio arranca justo
+  // en ese instante, en muchos equipos no suena nada. Esta espera es la
+  // mitad del arreglo de "con audífonos a veces no suena nada"; la otra
+  // mitad es no tener nunca el micrófono abierto mientras la app habla.
+  const ASENTAR_MIC_MS = 800;
+
+  const UMBRAL_COINCIDENCIA = 0.55;
+  const CLAVE_MIC = 'rezar_mic_dispositivo';
+
+  const rec = {
+    obj: null,
+    sesionActiva: false,
+    arrancando: false,
+    turno: null,          // { id, texto, alConfirmar, acumulado }
+    sesionDeTurno: 0,     // id del turno para el que se abrió la sesión en curso
+    textoSesion: '',
+    ultimoFin: 0,         // cuándo se cerró el micrófono por última vez
+    usadoAlgunaVez: false,
+    erroresRed: 0,
+    reintentos: 0,
+    pista: null,          // pista del micrófono elegido en Ajustes, si hay
+    esperasMic: [],
+    contador: 0
+  };
+
+  // Región para el reconocimiento: primero el idioma del navegador si
+  // trae país (es-CO, es-MX...); si no, se deduce de la zona horaria.
+  const ZONA_A_REGION = {
+    'America/Bogota': 'es-CO', 'America/Mexico_City': 'es-MX', 'America/Monterrey': 'es-MX',
+    'America/Tijuana': 'es-MX', 'America/Cancun': 'es-MX', 'America/Merida': 'es-MX',
+    'America/Chihuahua': 'es-MX', 'America/Lima': 'es-PE', 'America/Santiago': 'es-CL',
+    'America/Caracas': 'es-VE', 'America/Guayaquil': 'es-EC', 'America/La_Paz': 'es-BO',
+    'America/Asuncion': 'es-PY', 'America/Montevideo': 'es-UY', 'America/Guatemala': 'es-GT',
+    'America/Costa_Rica': 'es-CR', 'America/Panama': 'es-PA', 'America/El_Salvador': 'es-SV',
+    'America/Tegucigalpa': 'es-HN', 'America/Managua': 'es-NI', 'America/Santo_Domingo': 'es-DO',
+    'America/Puerto_Rico': 'es-PR', 'Europe/Madrid': 'es-ES', 'Atlantic/Canary': 'es-ES'
+  };
+
+  function idiomaReconocimiento() {
+    const langs = (navigator.languages && navigator.languages.length)
+      ? navigator.languages : [navigator.language || ''];
+    for (const l of langs) {
+      if (/^es-[a-z]{2}$/i.test(l)) return 'es-' + l.slice(3).toUpperCase();
+    }
+    try {
+      const zona = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+      if (ZONA_A_REGION[zona]) return ZONA_A_REGION[zona];
+      if (zona.indexOf('America/Argentina') === 0) return 'es-AR';
+    } catch (e) { /* sin Intl: se usa el de por defecto */ }
+    return 'es-ES';
+  }
 
   function normalizarParaComparar(texto) {
-    return texto
+    return String(texto || '')
       .toLowerCase()
-      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^a-z0-9\s]/g, ' ')
+      .normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-z0-9ñ\s]/g, ' ')
       .split(/\s+/)
       .filter(Boolean);
   }
 
-  function coincideSuficiente(esperado, dicho) {
-    const palabrasEsperadas = normalizarParaComparar(esperado);
-    if (!palabrasEsperadas.length) return false;
-    const palabrasDichas = new Set(normalizarParaComparar(dicho));
-    let coincidencias = 0;
-    for (const palabra of palabrasEsperadas) {
-      if (palabrasDichas.has(palabra)) coincidencias++;
-    }
-    return coincidencias / palabrasEsperadas.length >= 0.6;
+  // "misericordia" ~ "misericordias", "salvador" ~ "salvadora": mismo
+  // tronco, que es lo que el reconocedor suele confundir.
+  function palabrasParecidas(a, b) {
+    if (a === b) return true;
+    const n = Math.min(a.length, b.length);
+    if (n < 5 || Math.abs(a.length - b.length) > 2) return false;
+    return a.slice(0, n - 1) === b.slice(0, n - 1);
   }
 
-  function crearReconocedorSiHaceFalta() {
-    if (reconocedorGlobal) return reconocedorGlobal;
+  function puntajeCoincidencia(esperado, dicho) {
+    const esperadas = normalizarParaComparar(esperado);
+    if (!esperadas.length) return 0;
+    const oidas = normalizarParaComparar(dicho);
+    const exactas = new Set(oidas);
+    let aciertos = 0;
+    for (const p of esperadas) {
+      if (exactas.has(p) || oidas.some((o) => palabrasParecidas(p, o))) aciertos++;
+    }
+    return aciertos / esperadas.length;
+  }
 
-    const reconocedor = new CtorReconocimiento();
-    reconocedor.lang = 'es-ES';
-    reconocedor.continuous = true;
-    reconocedor.interimResults = true;
-    reconocedor.maxAlternatives = 1;
+  function coincideSuficiente(esperado, dicho) {
+    return puntajeCoincidencia(esperado, dicho) >= UMBRAL_COINCIDENCIA;
+  }
 
-    reconocedor.onresult = (evento) => {
-      if (!expectativaActual) return;
-      let transcrito = '';
-      for (let i = evento.resultIndex; i < evento.results.length; i++) {
-        transcrito += ' ' + evento.results[i][0].transcript;
+  function crearReconocedor() {
+    if (rec.obj) return rec.obj;
+
+    const r = new CtorReconocimiento();
+    r.lang = idiomaReconocimiento();
+    r.continuous = true;
+    r.interimResults = true;
+    r.maxAlternatives = 1;
+
+    r.onresult = (evento) => {
+      const t = rec.turno;
+      if (!t || rec.sesionDeTurno !== t.id) return;   // sesión de un turno anterior
+      rec.erroresRed = 0;
+
+      // Todo lo oído en ESTA sesión, desde el principio — no solo lo
+      // que cambió en este evento (evento.resultIndex).
+      let oido = '';
+      for (let i = 0; i < evento.results.length; i++) {
+        oido += ' ' + evento.results[i][0].transcript;
       }
-      if (coincideSuficiente(expectativaActual.texto, transcrito)) {
-        const cb = expectativaActual.callback;
-        expectativaActual = null;
-        cb();
-      }
+      rec.textoSesion = oido;
+
+      if (coincideSuficiente(t.texto, t.acumulado + ' ' + oido)) confirmarTurno(t);
     };
 
-    reconocedor.onerror = (evento) => {
-      // 'no-speech' (no detectó nada por unos segundos) y 'aborted' son
-      // normales mientras el usuario respira o piensa antes de hablar:
-      // no hay que apagar el reconocimiento por eso, dejamos que 'onend'
-      // lo reinicie solo. Solo cortamos de verdad si el problema es de
-      // permisos o de micrófono.
-      if (evento.error === 'not-allowed' || evento.error === 'service-not-allowed' || evento.error === 'audio-capture') {
-        voz.reconocerVoz = false;
-        localStorage.setItem('rezar_reconocer', 'false');
-        if (el.checkReconocer) el.checkReconocer.checked = false;
-        if (el.notaReconocer) {
-          el.notaReconocer.hidden = false;
-          el.notaReconocer.textContent = 'No pude usar el micrófono (permiso denegado o no disponible). Actívalo en los ajustes del navegador si quieres esta función.';
+    r.onerror = (evento) => {
+      if (evento.error === 'not-allowed' || evento.error === 'service-not-allowed' ||
+          evento.error === 'audio-capture') {
+        desactivarReconocimiento('No pude usar el micrófono (permiso denegado o no disponible). Actívalo en los ajustes del navegador si quieres esta función.');
+        return;
+      }
+      if (evento.error === 'network') {
+        // Sin internet, o un navegador que no ofrece el servicio (Brave
+        // lo trae apagado). Antes se reintentaba en bucle sin avisar.
+        rec.erroresRed++;
+        if (rec.erroresRed >= 3) {
+          avisarReconocimiento('El reconocimiento de voz no está respondiendo: sin conexión, o este navegador no ofrece el servicio (Brave, por ejemplo, lo trae apagado; en Chrome o Edge sí funciona). Los botones siguen funcionando igual.');
+          rec.turno = null;
+          if (el.indicadorEscucha) el.indicadorEscucha.hidden = true;
         }
-        reconociendoActivo = false;
-        if (el.indicadorEscucha) el.indicadorEscucha.hidden = true;
       }
-      // cualquier otro error: no hacemos nada, 'onend' se encarga de reintentar
+      // 'no-speech' y 'aborted' son normales: onend decide si reinicia.
     };
 
-    reconocedor.onend = () => {
-      if (!reconociendoActivo) return;
-      // Pequeña espera antes de reiniciar: arrancar de inmediato en el
-      // mismo instante en que terminó puede lanzar un error en algunos
-      // navegadores (todavía se está cerrando el anterior).
-      setTimeout(() => {
-        if (!reconociendoActivo) return;
-        try {
-          reconocedor.start();
-        } catch (e) {
-          // 'ya estaba iniciado' u otro error pasajero: reintenta una vez más.
-          setTimeout(() => {
-            if (reconociendoActivo) {
-              try { reconocedor.start(); } catch (e2) { /* se reintentará en el próximo turno */ }
-            }
-          }, 500);
-        }
-      }, 250);
+    r.onend = () => {
+      rec.sesionActiva = false;
+      rec.ultimoFin = Date.now();
+      soltarPista();
+
+      const t = rec.turno;
+      if (t && rec.sesionDeTurno === t.id && rec.textoSesion) {
+        // Android corta la sesión tras cada frase: lo oído hasta aquí se
+        // guarda para que la frase siguiente se sume, no la reemplace.
+        t.acumulado += ' ' + rec.textoSesion;
+      }
+      rec.textoSesion = '';
+
+      if (rec.turno) {
+        setTimeout(arrancarSesion, 200);
+      } else {
+        liberarEsperasMic();
+      }
     };
 
-    reconocedorGlobal = reconocedor;
-    return reconocedor;
+    rec.obj = r;
+    return r;
+  }
+
+  // Si el usuario eligió un micrófono concreto en Ajustes (por ejemplo,
+  // el del computador en vez del de los audífonos Bluetooth), se le pasa
+  // al reconocedor. Así los audífonos no pasan a "modo llamada" y el
+  // audio no se corta. En navegadores que todavía no aceptan elegir
+  // micrófono, se usa el predeterminado, como antes.
+  async function pistaMicrofonoElegido() {
+    let id = null;
+    try { id = localStorage.getItem(CLAVE_MIC); } catch (e) { id = null; }
+    if (!id || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return null;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: id } } });
+      return stream.getAudioTracks()[0] || null;
+    } catch (e) {
+      return null;   // ese micrófono ya no está: se usa el predeterminado
+    }
+  }
+
+  function soltarPista() {
+    if (rec.pista) {
+      try { rec.pista.stop(); } catch (e) { /* nada */ }
+      rec.pista = null;
+    }
+  }
+
+  async function arrancarSesion() {
+    const t = rec.turno;
+    if (!t || rec.sesionActiva || rec.arrancando) return;
+    rec.arrancando = true;
+
+    const r = crearReconocedor();
+    const pista = await pistaMicrofonoElegido();
+
+    // El turno pudo cambiar mientras se abría el micrófono.
+    if (rec.turno !== t) {
+      if (pista) pista.stop();
+      rec.arrancando = false;
+      liberarEsperasMic();
+      return;
+    }
+
+    try {
+      if (pista) {
+        rec.pista = pista;
+        r.start(pista);
+      } else {
+        r.start();
+      }
+      rec.sesionActiva = true;
+      rec.usadoAlgunaVez = true;
+      rec.sesionDeTurno = t.id;
+      rec.textoSesion = '';
+      rec.reintentos = 0;
+    } catch (e) {
+      // La sesión anterior todavía se estaba cerrando: se reintenta en
+      // un momento, unas pocas veces.
+      if (pista) pista.stop();
+      rec.pista = null;
+      if (rec.reintentos++ < 5) setTimeout(arrancarSesion, 400);
+    }
+    rec.arrancando = false;
+  }
+
+  function confirmarTurno(t) {
+    if (rec.turno !== t) return;
+    const alConfirmar = t.alConfirmar;
+    detenerEscucha();
+    alConfirmar();
   }
 
   function detenerEscucha() {
-    reconociendoActivo = false;
-    expectativaActual = null;
+    rec.turno = null;
     if (el.indicadorEscucha) el.indicadorEscucha.hidden = true;
-    if (reconocedorGlobal) {
-      try { reconocedorGlobal.stop(); } catch (e) { /* ya estaba detenido */ }
+
+    if (rec.obj && rec.sesionActiva) {
+      // abort() y no stop(): stop() todavía entrega lo último que oyó.
+      try { rec.obj.abort(); } catch (e) { /* ya estaba cerrado */ }
+    } else {
+      liberarEsperasMic();
     }
   }
 
   function escucharTurno(textoEsperado, alConfirmar) {
     if (!voz.reconocerVoz || !SOPORTA_RECONOCIMIENTO) return;
 
-    expectativaActual = { texto: textoEsperado, callback: alConfirmar };
-    reconociendoActivo = true;
+    rec.turno = { id: ++rec.contador, texto: textoEsperado, alConfirmar: alConfirmar, acumulado: '' };
+    rec.reintentos = 0;
     if (el.indicadorEscucha) el.indicadorEscucha.hidden = false;
 
-    const r = crearReconocedorSiHaceFalta();
-    try {
-      r.start();
-    } catch (e) {
-      // Ya estaba escuchando de un turno anterior: no pasa nada,
-      // expectativaActual ya quedó actualizada arriba.
+    if (rec.sesionActiva) {
+      // Queda una sesión de otro turno cerrándose: se descarta, y al
+      // terminar (onend) se abre la de este turno.
+      try { rec.obj.abort(); } catch (e) { /* nada */ }
+    } else {
+      arrancarSesion();
     }
+  }
+
+  // Resuelve cuando el micrófono está cerrado Y ya pasó el rato que los
+  // audífonos necesitan para volver al modo normal. Si el micrófono no se
+  // usó recién, resuelve al instante.
+  function microfonoLibre() {
+    return new Promise((resolve) => {
+      let hecho = false;
+      const terminar = () => { if (!hecho) { hecho = true; resolve(); } };
+
+      const revisar = () => {
+        if (rec.sesionActiva || rec.arrancando) {
+          rec.esperasMic.push(revisar);
+          return;
+        }
+        const falta = rec.usadoAlgunaVez ? ASENTAR_MIC_MS - (Date.now() - rec.ultimoFin) : 0;
+        if (falta > 0) setTimeout(terminar, falta); else terminar();
+      };
+
+      revisar();
+      // Seguro: si algún navegador nunca avisa que cerró, no se bloquea.
+      setTimeout(terminar, 2500);
+    });
+  }
+
+  function liberarEsperasMic() {
+    const esperas = rec.esperasMic.splice(0);
+    esperas.forEach((fn) => fn());
+  }
+
+  // Para todo lo que va a sonar: primero se asegura de que el micrófono
+  // esté cerrado y los audífonos hayan vuelto a su modo normal, y solo
+  // entonces arranca — si el usuario sigue en el mismo paso.
+  function cuandoMicLibre(fn) {
+    if (!rec.usadoAlgunaVez && !rec.sesionActiva) { fn(); return; }
+    const pasoAlPedir = estado.pasos[estado.indice];
+    microfonoLibre().then(() => {
+      if (estado.pasos[estado.indice] !== pasoAlPedir) return;
+      fn();
+    });
+  }
+
+  function avisarReconocimiento(texto) {
+    if (!el.notaReconocer) return;
+    el.notaReconocer.hidden = false;
+    el.notaReconocer.textContent = texto;
+  }
+
+  function desactivarReconocimiento(texto) {
+    voz.reconocerVoz = false;
+    try { localStorage.setItem('rezar_reconocer', 'false'); } catch (e) { /* nada */ }
+    if (el.checkReconocer) el.checkReconocer.checked = false;
+    avisarReconocimiento(texto);
+    detenerEscucha();
   }
 
   // Pide el permiso de micrófono una sola vez, en un momento explícito
   // (el usuario toca un botón), en vez de que aparezca de sorpresa a
-  // mitad de una oración. El permiso en sí lo recuerda el navegador, no
-  // esta app — esto solo deja constancia en pantalla de que ya se
-  // concedió, para que el usuario sepa que no hace falta repetirlo.
+  // mitad de una oración. El permiso en sí lo recuerda el navegador.
   async function activarMicrofono() {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       throw new Error('sin-getusermedia');
@@ -875,6 +755,9 @@
     checkReconocer: document.getElementById('check-reconocer'),
     notaReconocer: document.getElementById('nota-reconocer'),
     btnActivarMic: document.getElementById('btn-activar-mic'),
+    filaMic: document.getElementById('fila-mic'),
+    selectMic: document.getElementById('select-mic'),
+    notaMic: document.getElementById('nota-mic'),
     estadoVoz: document.getElementById('estado-voz'),
     campoClaveVoz: document.getElementById('campo-clave-voz'),
     btnGuardarClaveVoz: document.getElementById('btn-guardar-clave-voz'),
@@ -905,7 +788,8 @@
     fechaSeleccionada: new Date(),
     pasos: [],
     indice: 0,
-    horaActual: null
+    horaActual: null,
+    diaPreparado: false
   };
 
   function mostrarPantalla(pantalla) {
@@ -958,8 +842,24 @@
     mostrarPantalla(el.carga);
     el.textoCarga.textContent = `Buscando ${hora.nombre.toLowerCase()}…`;
 
+    // Primero, el día ya preparado: si el generador nocturno alcanzó a
+    // dejar esta hora lista, llega con los pasos y el audio hechos. Es
+    // lo que permite compartir la app sin repartir ninguna clave.
+    if (window.VozPrevia) {
+      const dia = await window.VozPrevia.obtenerDia(fechaISO(estado.fechaSeleccionada), hora.id);
+      if (dia) {
+        estado.diaPreparado = true;
+        voz.ultimoMotor = null;
+        await mostrarPasosListos(hora, dia.pasos);
+        actualizarTextoEstadoVoz();
+        return;
+      }
+    }
+    estado.diaPreparado = false;
+    voz.ultimoMotor = null;
+
     try {
-      const html = await obtenerHTMLHora(hora);
+      const html = await L.obtenerHTMLHora(estado.fechaSeleccionada, hora.id);
       await procesarYMostrar(hora, html);
     } catch (err) {
       if (err && err.opciones) {
@@ -974,11 +874,12 @@
   }
 
   async function procesarYMostrar(hora, html) {
-    const pasosCrudos = parsearLiturgia(html);
-    if (!pasosCrudos.length) throw new Error('vacio');
+    const pasos = L.prepararPasos(html);
+    if (!pasos.length) throw new Error('vacio');
+    await mostrarPasosListos(hora, pasos);
+  }
 
-    const pasos = agruparLecturasEnParrafos(pasosCrudos);
-    marcarPiezasCantables(pasos);
+  async function mostrarPasosListos(hora, pasos) {
     await cargarAudiosDePasos(pasos);
 
     estado.pasos = pasos;
@@ -1010,7 +911,7 @@
     mostrarPantalla(el.carga);
     el.textoCarga.textContent = `Buscando ${hora.nombre.toLowerCase()}…`;
     try {
-      const html = await obtenerHTMLHora(hora, numero);
+      const html = await L.obtenerHTMLHora(estado.fechaSeleccionada, hora.id, numero);
       await procesarYMostrar(hora, html);
     } catch (err) {
       el.textoError.textContent = `No encontré el texto de ${hora.nombre.toLowerCase()} para esa opción.`;
@@ -1059,6 +960,8 @@
     if (estado.indice < 0) estado.indice = 0;
 
     const paso = estado.pasos[estado.indice];
+    restaurarBotonEscuchar();
+    actualizarMetadatosMedios(paso);
     el.etiqueta.textContent = paso.etiqueta;
     el.texto.textContent = paso.texto;
     el.texto.classList.toggle('es-titulo', paso.tipo === 'titulo');
@@ -1081,7 +984,11 @@
       el.estado.textContent = 'Escucha…';
       el.estado.classList.remove('es-turno');
       el.btnContinuar.textContent = 'Ya la repetí';
-      hablar(paso.texto, () => {
+      // hablarPartes y no hablar(): así la antífona usa el audio ya
+      // preparado del día. Antes llamaba directo a hablar(), que solo
+      // conoce la voz en vivo o la del sistema, y las antífonas sonaban
+      // siempre con la voz robótica aunque el día estuviera preparado.
+      hablarPartes(paso, () => {
         if (estado.pasos[estado.indice] !== paso) return;
         el.estado.textContent = 'Repite la antífona';
         el.estado.classList.add('es-turno');
@@ -1162,7 +1069,9 @@
       el.reproductorPieza.onended = () => {
         if (voz.autoavanzar) saltarPieza(paso);
       };
-      el.reproductorPieza.play().catch(() => { /* el usuario le da play manualmente */ });
+      cuandoMicLibre(() => {
+        el.reproductorPieza.play().catch(() => { /* tiene controles: el usuario le da play */ });
+      });
     } else {
       el.piezaAsignar.hidden = false;
       el.btnContinuar.textContent = 'Continuar';
@@ -1219,9 +1128,114 @@
   el.btnAtras.addEventListener('click', retroceder);
   el.btnSalir.addEventListener('click', salir);
   el.btnEscuchar.addEventListener('click', () => {
+    if (window.Reproductor && window.Reproductor.estaInterrumpido()) {
+      window.Reproductor.reanudar();
+      return;
+    }
     const paso = estado.pasos[estado.indice];
     if (paso) hablarPartes(paso, () => {});
   });
+
+  // ---------------------------------------------------------------------
+  // Audio en pausa sin que lo pidiéramos
+  //
+  // Audífonos que se desconectan, el Bluetooth que se cae un segundo,
+  // otra app que toma el audio, el navegador que no deja sonar sin un
+  // toque... Antes la app se quedaba muda y colgada sin decir nada. Ahora
+  // el audio queda en pausa en el punto exacto, la pantalla lo dice, y el
+  // botón 🔊 pasa a ▶ para seguir desde ahí.
+  // ---------------------------------------------------------------------
+
+  let estadoAntesDePausa = null;
+
+  function restaurarBotonEscuchar() {
+    el.btnEscuchar.textContent = '🔊';
+    el.btnEscuchar.title = 'Repetir en voz alta';
+    el.btnEscuchar.classList.remove('es-reanudar');
+    estadoAntesDePausa = null;
+  }
+
+  window.addEventListener('rezar-audio-interrumpido', (e) => {
+    if (el.oracion.hidden) return;
+    const motivo = e.detail && e.detail.motivo;
+    if (estadoAntesDePausa === null) {
+      estadoAntesDePausa = {
+        texto: el.estado.textContent,
+        turno: el.estado.classList.contains('es-turno')
+      };
+    }
+    el.estado.textContent = motivo === 'bloqueado'
+      ? 'Toca ▶ para empezar a escuchar.'
+      : 'En pausa (¿se desconectaron los audífonos?). Toca ▶ para seguir.';
+    el.estado.classList.add('es-turno');
+    el.btnEscuchar.hidden = false;
+    el.btnEscuchar.textContent = '▶';
+    el.btnEscuchar.title = 'Seguir escuchando';
+    el.btnEscuchar.classList.add('es-reanudar');
+  });
+
+  window.addEventListener('rezar-audio-reanudado', () => {
+    const antes = estadoAntesDePausa;
+    restaurarBotonEscuchar();
+    if (antes) {
+      el.estado.textContent = antes.texto;
+      el.estado.classList.toggle('es-turno', antes.turno);
+    }
+  });
+
+  // ---------------------------------------------------------------------
+  // Botones de los audífonos y de la pantalla bloqueada
+  //
+  // Con esto, el botón de play/pausa de los audífonos pausa y sigue la
+  // oración, y los de siguiente/anterior avanzan o retroceden un paso.
+  // En el celular también aparecen los controles en la pantalla
+  // bloqueada.
+  // ---------------------------------------------------------------------
+
+  function configurarSesionMedios() {
+    if (!('mediaSession' in navigator)) return;
+    const poner = (accion, fn) => {
+      try { navigator.mediaSession.setActionHandler(accion, fn); } catch (e) { /* acción no soportada */ }
+    };
+    poner('play', () => {
+      if (window.Reproductor && window.Reproductor.estaInterrumpido()) {
+        window.Reproductor.reanudar();
+      } else if (!el.oracion.hidden) {
+        const paso = estado.pasos[estado.indice];
+        if (paso) hablarPartes(paso, () => {});
+      }
+    });
+    poner('pause', () => { if (window.Reproductor) window.Reproductor.pausar(); });
+    poner('nexttrack', () => { if (!el.oracion.hidden) el.btnContinuar.click(); });
+    poner('previoustrack', () => { if (!el.oracion.hidden) retroceder(); });
+  }
+
+  function actualizarMetadatosMedios(paso) {
+    if (!('mediaSession' in navigator) || typeof window.MediaMetadata !== 'function') return;
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: estado.horaActual ? estado.horaActual.nombre : 'Modo Rezar',
+        artist: paso ? paso.etiqueta : '',
+        album: 'Modo Rezar',
+        artwork: [
+          { src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png' },
+          { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png' }
+        ]
+      });
+    } catch (e) { /* nada */ }
+  }
+
+  configurarSesionMedios();
+
+  // El primer toque del usuario "desbloquea" el reproductor: después el
+  // navegador deja sonar sin pedir más toques (el iPhone lo exige).
+  function desbloquearAudio() {
+    if (window.Reproductor) window.Reproductor.desbloquear();
+  }
+  el.btnContinuar.addEventListener('click', desbloquearAudio);
+  el.btnEscuchar.addEventListener('click', desbloquearAudio);
+  el.listaHoras.addEventListener('click', desbloquearAudio, true);
+  el.listaOpciones.addEventListener('click', desbloquearAudio, true);
 
   // ---------------------------------------------------------------------
   // Voz de Fish Audio: estado visible y clave de API
@@ -1233,48 +1247,49 @@
   // en consola y nunca sale hacia otro sitio que no sea api.fish.audio.
   // ---------------------------------------------------------------------
 
+  // Qué voz está sonando de verdad. Lo principal es el audio preparado del
+  // día (voz local, sin clave, igual para todos); la voz en vivo con Fish
+  // Audio es una opción avanzada para quien tenga su propia clave.
   function actualizarTextoEstadoVoz(detalle) {
     if (!el.estadoVoz) return;
 
-    if (!window.VozFish) {
-      el.estadoVoz.textContent = 'Voz Fish Audio: no se pudo cargar el módulo de voz. Usando la voz del sistema.';
+    const tieneFish = !!(window.VozFish && window.VozFish.tieneClave());
+
+    if (voz.ultimoMotor === 'pregenerado' || (estado.diaPreparado && voz.ultimoMotor !== 'sistema')) {
+      el.estadoVoz.textContent = 'Voz: preparada para este día — la misma para todos.';
       return;
     }
 
-    const d = detalle || window.VozFish.obtenerEstado();
-    switch (d.fase) {
-      case 'lista':
-        el.estadoVoz.textContent = 'Voz Fish Audio: activa.';
-        break;
-      case 'sin-clave':
-        el.estadoVoz.textContent = 'Voz Fish Audio: falta tu clave de API (pégala aquí abajo). Mientras tanto se usa la voz del sistema.';
-        break;
-      case 'error-clave':
-        el.estadoVoz.textContent = 'Fish Audio rechazó la clave de API. Revísala aquí abajo. Mientras tanto se usa la voz del sistema.';
-        break;
-      case 'error-cuota':
-        el.estadoVoz.textContent = 'La cuenta de Fish Audio no tiene saldo o cuota disponible. Mientras tanto se usa la voz del sistema.';
-        break;
-      case 'error-voz':
-        el.estadoVoz.textContent = window.VozFish.MSG_VOZ_NO_DISPONIBLE + ' Mientras tanto se usa la voz del sistema.';
-        break;
-      case 'error-red':
-        el.estadoVoz.textContent = 'No pude contactar a Fish Audio (sin conexión, o el navegador bloqueó la petición). Mientras tanto se usa la voz del sistema.';
-        break;
-      case 'error-api':
-        el.estadoVoz.textContent = 'Fish Audio devolvió un error. Detalle: ' + (d.error || 'desconocido') + '. Mientras tanto se usa la voz del sistema.';
-        break;
-      default:
-        el.estadoVoz.textContent = 'Voz Fish Audio: en espera.';
+    if (voz.ultimoMotor === 'sistema') {
+      el.estadoVoz.textContent = estado.diaPreparado
+        ? 'Voz: una parte no estaba preparada y se leyó con la voz del sistema del dispositivo.'
+        : 'Voz: esta hora de este día todavía no está preparada, así que se lee con la voz del sistema del dispositivo. Cada madrugada se preparan hoy y los dos días siguientes.';
+      if (tieneFish) el.estadoVoz.textContent += ' Fish Audio no pudo leerlo: ' + textoEstadoFish(detalle);
+      return;
     }
 
-    // Lo más útil para saber a qué atenerse: quién habló de verdad la
-    // última vez. Si suena robótico y aquí dice "la voz del sistema",
-    // el problema no es Fish Audio — es que Fish Audio no llegó a sonar.
-    if (voz.ultimoMotor === 'fish') {
-      el.estadoVoz.textContent += ' — lo último que sonó lo generó Fish Audio.';
-    } else if (voz.ultimoMotor === 'sistema') {
-      el.estadoVoz.textContent += ' — ojo: lo último que sonó fue la voz del sistema, no Fish Audio.';
+    if (tieneFish) {
+      el.estadoVoz.textContent = 'Voz en vivo con Fish Audio: ' + textoEstadoFish(detalle);
+      return;
+    }
+
+    el.estadoVoz.textContent = estado.diaPreparado
+      ? 'Voz: preparada para este día.'
+      : 'Voz: esta hora de este día todavía no está preparada, así que se leerá con la voz del sistema del dispositivo. Cada madrugada se preparan hoy y los dos días siguientes.';
+  }
+
+  function textoEstadoFish(detalle) {
+    if (!window.VozFish) return 'no se pudo cargar.';
+    const d = detalle || window.VozFish.obtenerEstado();
+    switch (d.fase) {
+      case 'lista': return 'activa.';
+      case 'sin-clave': return 'falta la clave.';
+      case 'error-clave': return 'rechazó la clave; revísala.';
+      case 'error-cuota': return 'la cuenta no tiene saldo o cuota.';
+      case 'error-voz': return window.VozFish.MSG_VOZ_NO_DISPONIBLE;
+      case 'error-red': return 'sin conexión, o el navegador bloqueó la petición.';
+      case 'error-api': return 'devolvió un error (' + (d.error || 'desconocido') + ').';
+      default: return 'en espera.';
     }
   }
 
@@ -1329,6 +1344,7 @@
 
   el.btnConfig.addEventListener('click', () => {
     el.panelConfig.hidden = !el.panelConfig.hidden;
+    if (!el.panelConfig.hidden) actualizarTextoEstadoVoz();
   });
 
   el.rangoVelocidad.addEventListener('input', () => {
@@ -1373,6 +1389,75 @@
           el.btnActivarMic.textContent = 'No se pudo activar — revisa los permisos del navegador';
         }
       });
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // Elegir el micrófono para el reconocimiento
+  //
+  // Cuando una página usa el micrófono de unos audífonos Bluetooth, el
+  // sistema los pasa a "modo llamada": en Windows la salida estéreo se
+  // queda muda, y en el celular el sonido baja de calidad o se va por el
+  // altavoz. Usar el micrófono del computador o del celular evita eso por
+  // completo, y los audífonos siguen sonando normal.
+  // ---------------------------------------------------------------------
+
+  const RE_MIC_AUDIFONOS = /hands-?free|manos libres|headset|auricular|aud[ií]fono|bluetooth|airpods|buds|wh-|wf-|jabra|bose/i;
+
+  async function llenarListaMicrofonos() {
+    if (!el.selectMic || !navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+
+    let dispositivos = [];
+    try { dispositivos = await navigator.mediaDevices.enumerateDevices(); } catch (e) { return; }
+
+    const entradas = dispositivos.filter((d) =>
+      d.kind === 'audioinput' && d.deviceId && d.deviceId !== 'default' && d.deviceId !== 'communications');
+    const porDefecto = dispositivos.find((d) => d.kind === 'audioinput' && d.deviceId === 'default');
+
+    let elegido = '';
+    try { elegido = localStorage.getItem(CLAVE_MIC) || ''; } catch (e) { elegido = ''; }
+
+    el.selectMic.innerHTML = '';
+    el.selectMic.add(new Option('El predeterminado del sistema', ''));
+    entradas.forEach((d, i) => {
+      el.selectMic.add(new Option(d.label || ('Micrófono ' + (i + 1)), d.deviceId));
+    });
+    el.selectMic.value = entradas.some((d) => d.deviceId === elegido) ? elegido : '';
+
+    // Sin permiso concedido, el navegador no da los nombres.
+    const sinNombres = entradas.length > 0 && entradas.every((d) => !d.label);
+    // Si el predeterminado parece ser el de unos audífonos y no se ha
+    // elegido otro, se resalta el consejo.
+    const predeterminadoEsAudifono = !elegido && porDefecto && RE_MIC_AUDIFONOS.test(porDefecto.label || '');
+
+    if (el.notaMic) {
+      el.notaMic.classList.toggle('nota-importante', !!predeterminadoEsAudifono);
+      if (sinNombres) {
+        el.notaMic.textContent = 'Toca "Activar micrófono ahora" para ver los nombres de los micrófonos. Con audífonos Bluetooth conviene elegir el del computador o del celular.';
+      } else if (predeterminadoEsAudifono) {
+        el.notaMic.textContent = 'Tu micrófono predeterminado es el de los audífonos. Eso los pasa a "modo llamada" y puede dejarlos sin sonido: elige aquí el micrófono del computador o del celular.';
+      } else {
+        el.notaMic.textContent = 'Con audífonos Bluetooth, elige aquí el micrófono del computador o del celular: así los audífonos no pasan a "modo llamada" y el audio no se corta.';
+      }
+    }
+  }
+
+  if (el.filaMic) {
+    const puedeElegir = SOPORTA_RECONOCIMIENTO && navigator.mediaDevices && navigator.mediaDevices.enumerateDevices;
+    el.filaMic.hidden = !puedeElegir;
+
+    if (puedeElegir) {
+      el.selectMic.addEventListener('change', () => {
+        try {
+          if (el.selectMic.value) localStorage.setItem(CLAVE_MIC, el.selectMic.value);
+          else localStorage.removeItem(CLAVE_MIC);
+        } catch (e) { /* nada */ }
+        llenarListaMicrofonos();
+      });
+      el.btnConfig.addEventListener('click', () => { if (!el.panelConfig.hidden) llenarListaMicrofonos(); });
+      if (el.btnActivarMic) el.btnActivarMic.addEventListener('click', () => setTimeout(llenarListaMicrofonos, 800));
+      try { navigator.mediaDevices.addEventListener('devicechange', llenarListaMicrofonos); } catch (e) { /* nada */ }
+      llenarListaMicrofonos();
     }
   }
 
