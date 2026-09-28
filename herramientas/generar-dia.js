@@ -275,6 +275,12 @@ async function principal() {
     }
   }
 
+  if (!leidas.length && !args.seco) {
+    // Sin ninguna hora leída no hay nada que publicar: mejor fallar (y
+    // que quede en pie lo publicado ayer) que publicar un sitio vacío.
+    throw new Error('No se pudo leer ninguna hora de la fuente de la liturgia.');
+  }
+
   // --- 2. Generar lo que falte, todo de una vez ---------------------
   const todos = new Set();
   for (const l of leidas) for (const b of L.bloquesDeVoz(l.pasos)) todos.add(b);
