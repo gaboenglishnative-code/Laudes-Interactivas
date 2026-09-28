@@ -123,24 +123,53 @@ def bajar(url, destino):
     return destino
 
 
+def hay_ffmpeg():
+    import shutil
+    return shutil.which("ffmpeg") is not None
+
+
+def puede_guardar_mp3():
+    """ffmpeg, o si no, soundfile con MP3 (libsndfile >= 1.1). Se revisa
+    ANTES de cargar el modelo: sin esto, una noche entera de trabajo se
+    pierde al final, al no poder escribir ni un archivo."""
+    if hay_ffmpeg():
+        return True
+    try:
+        import soundfile as sf
+        return "MP3" in sf.available_formats()
+    except Exception:
+        return False
+
+
 def guardar_mp3(audio, sr, ruta, kbps=64):
     import soundfile as sf
     os.makedirs(os.path.dirname(os.path.abspath(ruta)) or ".", exist_ok=True)
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as t:
-        wav = t.name
+    audio = np.asarray(audio, dtype=np.float32).reshape(-1)
     # Se escribe aparte y se renombra al final: si el proceso se corta a
     # mitad (p. ej. el límite de tiempo del runner), no queda en la caché
     # un mp3 a medias que se reutilizaría para siempre.
     parcial = ruta + ".part.mp3"
+    wav = None
     try:
-        sf.write(wav, np.asarray(audio, dtype=np.float32), sr)
-        subprocess.run(
-            ["ffmpeg", "-y", "-loglevel", "error", "-i", wav, "-ac", "1", "-b:a", f"{kbps}k", parcial],
-            check=True,
-        )
+        if hay_ffmpeg():
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as t:
+                wav = t.name
+            sf.write(wav, audio, sr)
+            subprocess.run(
+                ["ffmpeg", "-y", "-loglevel", "error", "-i", wav, "-ac", "1", "-b:a", f"{kbps}k", parcial],
+                check=True,
+            )
+        else:
+            # Sin ffmpeg: libsndfile codifica MP3 directamente. En modo de
+            # tasa constante, compression_level va de 0 (320 kbps) a
+            # 1 (32 kbps).
+            nivel = min(1.0, max(0.0, (320 - kbps) / 288))
+            sf.write(parcial, audio, sr, format="MP3", subtype="MPEG_LAYER_III",
+                     bitrate_mode="CONSTANT", compression_level=nivel)
         os.replace(parcial, ruta)
     finally:
-        os.remove(wav)
+        if wav and os.path.exists(wav):
+            os.remove(wav)
         if os.path.exists(parcial):
             os.remove(parcial)
 
@@ -706,6 +735,10 @@ def cmd_generar(args):
         print("  nada que generar: todo está en caché", flush=True)
         return
 
+    if not puede_guardar_mp3():
+        sys.exit("No se pueden escribir mp3: falta ffmpeg y este soundfile no trae MP3. "
+                 "Instala ffmpeg (sudo apt-get install -y ffmpeg) o actualiza soundfile.")
+
     motor = MOTORES[args.motor]()
     referencia = None
     if motor.necesita_referencia:
@@ -731,12 +764,21 @@ def cmd_generar(args):
         except Exception as e:  # un bloque que falla no tumba el día
             fallidos += 1
             print(f"  ! bloque {i} falló: {e}", flush=True)
+            if fallidos == i == 3:
+                # Los tres primeros fallaron: es algo de fondo (una
+                # herramienta que falta, un modelo roto), no un bloque
+                # raro. Se para ya en vez de gastar horas para nada.
+                sys.exit("Los 3 primeros bloques fallaron; se detiene la generación. Mira el error arriba.")
         if i % 10 == 0 or i == len(pendientes):
             print(f"  {i}/{len(pendientes)} bloques · {total_audio/60:.1f} min de audio · "
                   f"{(time.time()-t0)/60:.1f} min generando", flush=True)
     if fallidos:
         print(f"  {fallidos} bloques fallidos (la app los leerá con la voz del sistema)", flush=True)
     e = motor.estadisticas
+    if fallidos == len(pendientes):
+        # Nada salió: que el workflow quede en rojo en vez de publicar un
+        # sitio sin voz y darlo por bueno.
+        sys.exit(f"Ningún bloque se pudo generar ({fallidos} fallidos). Mira el primer error arriba.")
     if verificador:
         print(f"  verificación: {e['trozos']} trozos, {e['reintentos']} reintentos, "
               f"{e.get('partidos', 0)} leídos en dos partes, "
