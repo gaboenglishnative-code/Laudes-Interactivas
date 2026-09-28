@@ -189,6 +189,7 @@ jobs:
         with:
           pattern: voz-*
           path: todas
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
       - run: pip install torch torchaudio --index-url "$TORCH_CPU"
       - run: pip install numpy
       - run: python herramientas/motores_voz.py informe --entrada todas --salida informe --naturalidad
