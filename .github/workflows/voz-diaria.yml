@@ -78,11 +78,17 @@ jobs:
 
       - name: Instalar el motor de voz (${{ env.MOTOR_VOZ }})
         run: |
+          # ffmpeg convierte cada audio a mp3. La imagen de Ubuntu de
+          # GitHub no lo trae (sin él, la primera noche se generó todo y
+          # no se pudo guardar nada).
+          if [ "$MOTOR_VOZ" != fish ]; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+          fi
           case "$MOTOR_VOZ" in
             supertonic*)
               # sherpa-onnx corre Supertonic y también Whisper, que verifica
               # que no se haya comido palabras.
-              pip install sherpa-onnx soundfile numpy ;;
+              pip install sherpa-onnx==1.13.8 soundfile==0.14.0 numpy ;;
             kokoro)
               pip install kokoro-onnx soundfile numpy ;;
             qwen3-*)
