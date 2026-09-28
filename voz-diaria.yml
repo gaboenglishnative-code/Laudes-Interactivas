@@ -1,0 +1,164 @@
+name: Preparar la voz del día
+
+# Cada madrugada prepara los próximos días: lee la liturgia, genera el
+# audio que falte con un motor de voz LOCAL (gratis, aquí mismo, sin
+# ninguna API) y publica el sitio entero (app + audio) en GitHub Pages.
+#
+# Por qué así:
+#   - La Liturgia de las Horas de un día es idéntica para todo el mundo,
+#     así que el audio se genera UNA vez y lo usan todos. Quien reza no
+#     necesita clave ni cuenta de nada.
+#   - En repositorios públicos, Actions es gratis y sin límite de
+#     minutos, así que esto no cuesta nada.
+#
+# ANTES DE QUE FUNCIONE, una sola vez:
+#   Settings → Pages → Source: "GitHub Actions"
+#   (no "Deploy from a branch": así el repositorio no engorda con los mp3)
+#
+# ELEGIR LA VOZ (opcional): Settings → Secrets and variables → Actions →
+# pestaña "Variables" → New repository variable
+#   Nombre: MOTOR_VOZ
+#   Valor:  supertonic (por defecto; voz M4) · supertonic-M1..M5 ·
+#           supertonic-F1..F5 (mujer) · kokoro · qwen3-clon ·
+#           omnivoice-clon · chatterbox-clon · fish
+# Los motores "-clon" repiten la voz de voz/referencia.wav (la que sale
+# del workflow "Probar voces locales"). "fish" usa Fish Audio y necesita
+# además el secreto FISH_API_KEY.
+
+on:
+  schedule:
+    # 08:00 UTC = 03:00 en Bogotá. Queda listo antes de Laudes.
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+    inputs:
+      dias:
+        description: 'Cuántos días preparar (desde hoy)'
+        required: false
+        default: '3'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Si ya hay un despliegue en curso, que este espere en vez de pisarlo.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  MOTOR_VOZ: ${{ vars.MOTOR_VOZ || 'supertonic' }}
+  HILOS_VOZ: '4'
+  CACHE_MODELOS: ${{ github.workspace }}/.modelos
+  HF_HOME: ${{ github.workspace }}/.modelos/hf
+  TORCH_CPU: https://download.pytorch.org/whl/cpu
+
+jobs:
+  preparar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+
+    steps:
+      - name: Traer el repositorio
+        uses: actions/checkout@v4
+
+      - name: Preparar Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Preparar Python
+        if: env.MOTOR_VOZ != 'fish'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar jsdom
+        run: npm install jsdom --no-save --no-fund --no-audit
+
+      - name: Instalar el motor de voz (${{ env.MOTOR_VOZ }})
+        run: |
+          case "$MOTOR_VOZ" in
+            supertonic*)
+              # sherpa-onnx corre Supertonic y también Whisper, que verifica
+              # que no se haya comido palabras.
+              pip install sherpa-onnx soundfile numpy ;;
+            kokoro)
+              pip install kokoro-onnx soundfile numpy ;;
+            qwen3-*)
+              sudo apt-get install -y sox
+              pip install torch torchaudio --index-url "$TORCH_CPU"
+              pip install qwen-tts soundfile sherpa-onnx ;;
+            omnivoice-*)
+              pip install torch torchaudio --index-url "$TORCH_CPU"
+              pip install omnivoice soundfile sherpa-onnx ;;
+            chatterbox-*)
+              pip install torch==2.6.0 torchaudio==2.6.0 --index-url "$TORCH_CPU"
+              pip install chatterbox-tts soundfile sherpa-onnx ;;
+            fish) ;;
+            *) echo "Motor desconocido: $MOTOR_VOZ"; exit 1 ;;
+          esac
+
+      # Los pesos del modelo (y los de Whisper, que verifica cada trozo)
+      # se guardan entre noches: no se vuelven a bajar cada vez.
+      - name: Recuperar el modelo de voz ya descargado
+        if: env.MOTOR_VOZ != 'fish'
+        uses: actions/cache@v4
+        with:
+          path: .modelos
+          key: modelos-${{ env.MOTOR_VOZ }}-v2
+
+      # El audio ya generado se guarda entre ejecuciones. Es lo que hace
+      # que un salmo que salió hace tres semanas no se vuelva a generar
+      # cuando el salterio da la vuelta: el nombre del archivo es el hash
+      # de su voz y su texto, así que se reconoce solo.
+      - name: Recuperar el audio ya generado
+        uses: actions/cache/restore@v4
+        with:
+          path: voz-cache
+          key: voz-cache-${{ env.MOTOR_VOZ }}-${{ github.run_id }}
+          restore-keys: |
+            voz-cache-${{ env.MOTOR_VOZ }}-
+
+      - name: Armar el sitio
+        run: |
+          mkdir -p sitio
+          # La app tal cual, sin lo que solo sirve para construir.
+          rsync -a --exclude '.git' --exclude '.github' --exclude 'herramientas' \
+                   --exclude 'node_modules' --exclude 'voz-cache' --exclude 'sitio' \
+                   --exclude '.modelos' --exclude 'voz' \
+                   --exclude '*.py' --exclude '__pycache__' \
+                   ./ sitio/
+
+      - name: Generar la voz de los próximos días
+        env:
+          FISH_API_KEY: ${{ secrets.FISH_API_KEY }}
+          PYTHON: python
+        run: |
+          node herramientas/generar-dia.js \
+            --dias "${{ github.event.inputs.dias || '3' }}" \
+            --salida sitio \
+            --cache voz-cache
+
+      - name: Guardar el audio para la próxima vez
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: voz-cache
+          key: voz-cache-${{ env.MOTOR_VOZ }}-${{ github.run_id }}
+
+      - name: Empaquetar el sitio
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: sitio
+
+  publicar:
+    needs: preparar
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Publicar en GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4

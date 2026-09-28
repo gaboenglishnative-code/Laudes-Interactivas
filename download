@@ -1,0 +1,8 @@
+# Carpetas de trabajo que se crean al generar o probar en local.
+node_modules/
+voz-cache/
+sitio/
+.modelos/
+muestras/
+__pycache__/
+dias/

@@ -1,0 +1,199 @@
+name: Probar voces locales
+
+# Genera la MISMA muestra litúrgica con cada motor de voz local y deja una
+# página para escucharlas lado a lado, ordenadas por naturalidad, con lo
+# que tarda cada uno en este mismo runner (4 núcleos, sin GPU). Todo
+# gratis, sin claves.
+#
+# Cada voz pasa por la MISMA verificación que se usa cada noche: cada
+# trozo se transcribe con Whisper y, si se comió palabras, se regenera.
+# El informe final le pone a cada voz una nota de naturalidad (UTMOS,
+# 1 = robótica, 5 = humana), igual que en las pruebas con que se eligió
+# Supertonic M4.
+#
+# Cómo usarlo:
+#   Actions → "Probar voces locales" → Run workflow.
+#   Al terminar (entre 20 minutos y un par de horas), en la página de la
+#   ejecución, abajo, aparece "muestras-voces": se descarga, se
+#   descomprime y se abre comparacion.html.
+#
+# La voz de referencia de los motores que "clonan" la crea Qwen3 a partir
+# de una DESCRIPCIÓN con palabras (hombre, voz grave y cálida, acento
+# latinoamericano neutro, lectura pausada). No es la voz de ninguna
+# persona real. Si ese paso fallara, los demás usan una frase de Kokoro.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  HILOS_VOZ: '4'
+  TORCH_CPU: https://download.pytorch.org/whl/cpu
+
+jobs:
+  # Las dos voces ligeras, como referencia para comparar.
+  ligeras:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        motor: [supertonic, supertonic-F1, kokoro]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install sherpa-onnx kokoro-onnx soundfile numpy
+      - run: python herramientas/motores_voz.py probar --motor ${{ matrix.motor }} --verificar --salida muestras
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: voz-${{ matrix.motor }}
+          path: muestras/
+          if-no-files-found: ignore
+
+  qwen3-diseno:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: sudo apt-get install -y sox
+      - run: pip install torch torchaudio --index-url "$TORCH_CPU"
+      - run: pip install qwen-tts soundfile sherpa-onnx
+      - run: python herramientas/motores_voz.py probar --motor qwen3-diseno --verificar --salida muestras
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: voz-qwen3-diseno
+          path: muestras/
+          if-no-files-found: ignore
+
+  qwen3-clon:
+    needs: qwen3-diseno
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: voz-qwen3-diseno
+          path: ref
+      - run: sudo apt-get install -y sox
+      - run: pip install torch torchaudio --index-url "$TORCH_CPU"
+      - run: pip install qwen-tts soundfile kokoro-onnx sherpa-onnx
+      - run: >
+          python herramientas/motores_voz.py probar --motor qwen3-clon --verificar --salida muestras
+          --ref ref/referencia.wav --ref-texto ref/referencia.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: voz-qwen3-clon
+          path: muestras/
+          if-no-files-found: ignore
+
+  omnivoice-diseno:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install torch torchaudio --index-url "$TORCH_CPU"
+      - run: pip install omnivoice soundfile sherpa-onnx
+      - run: python herramientas/motores_voz.py probar --motor omnivoice-diseno --verificar --salida muestras
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: voz-omnivoice-diseno
+          path: muestras/
+          if-no-files-found: ignore
+
+  omnivoice-clon:
+    needs: qwen3-diseno
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: voz-qwen3-diseno
+          path: ref
+      - run: pip install torch torchaudio --index-url "$TORCH_CPU"
+      - run: pip install omnivoice soundfile kokoro-onnx sherpa-onnx
+      - run: >
+          python herramientas/motores_voz.py probar --motor omnivoice-clon --verificar --salida muestras
+          --ref ref/referencia.wav --ref-texto ref/referencia.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: voz-omnivoice-clon
+          path: muestras/
+          if-no-files-found: ignore
+
+  chatterbox-clon:
+    needs: qwen3-diseno
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: voz-qwen3-diseno
+          path: ref
+      # chatterbox fija torch 2.6.0: se instala antes la versión de CPU
+      # para que no baje la de GPU (varios GB que aquí no sirven).
+      - run: pip install torch==2.6.0 torchaudio==2.6.0 --index-url "$TORCH_CPU"
+      - run: pip install chatterbox-tts soundfile kokoro-onnx sherpa-onnx
+      - run: >
+          python herramientas/motores_voz.py probar --motor chatterbox-clon --verificar --salida muestras
+          --ref ref/referencia.wav --ref-texto ref/referencia.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: voz-chatterbox-clon
+          path: muestras/
+          if-no-files-found: ignore
+
+  informe:
+    needs: [ligeras, qwen3-diseno, qwen3-clon, omnivoice-diseno, omnivoice-clon, chatterbox-clon]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: voz-*
+          path: todas
+      - run: pip install torch torchaudio --index-url "$TORCH_CPU"
+      - run: pip install numpy
+      - run: python herramientas/motores_voz.py informe --entrada todas --salida informe --naturalidad
+      - run: cp todas/voz-qwen3-diseno/referencia.* informe/ 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: muestras-voces
+          path: informe/
