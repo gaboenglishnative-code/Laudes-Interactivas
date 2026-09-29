@@ -312,8 +312,44 @@
     }
   }
 
+  // -------------------------------------------------------------------
+  // Avisos que la fuente trae como texto pero no se rezan
+  //
+  // Laudes empieza casi siempre con "(Si Laudes no es la primera oración
+  // del día se sigue el esquema del Invitatorio explicado en el Oficio de
+  // Lectura)": es una nota para quien ya rezó otra hora, no algo que se
+  // diga. Se quita, y la oración empieza con "Señor, abre mis labios".
+  // (Revisado en toda la fuente de mayo a septiembre de 2026: son solo
+  // estas dos líneas.)
+  // -------------------------------------------------------------------
+
+  const RUBRICAS_QUE_NO_SE_REZAN = [
+    /^\(?\s*si laudes no es la primera oracion del dia/,
+    /^se sigue el esquema del invitatorio explicado/
+  ];
+
+  function sinTildes(texto) {
+    return String(texto || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+  }
+
+  function quitarRubricas(pasos) {
+    return pasos.filter((p) => {
+      const t = sinTildes(p.texto);
+      return !RUBRICAS_QUE_NO_SE_REZAN.some((re) => re.test(t));
+    });
+  }
+
+  // Dónde empieza la oración: en el primer paso que se reza ("Señor, abre
+  // mis labios" / "Dios mío, ven en mi auxilio"), no en los títulos de
+  // antes ("LAUDES", "INVOCACIÓN INICIAL"...), que pedirían tocar
+  // "Continuar" varias veces antes de empezar. Con "Atrás" se ven igual.
+  function primerPasoQueSeReza(pasos) {
+    const i = pasos.findIndex((p) => p.tipo !== 'titulo');
+    return i < 0 ? 0 : i;
+  }
+
   function prepararPasos(html) {
-    const pasos = agruparLecturasEnParrafos(parsearLiturgia(html));
+    const pasos = quitarRubricas(agruparLecturasEnParrafos(parsearLiturgia(html)));
     marcarPiezasCantables(pasos);
     return pasos;
   }
@@ -439,6 +475,7 @@
     extraerLineas, fusionarRuns, clasificarLinea, parsearLiturgia,
     agruparLecturasEnParrafos,
     RE_PIEZA, normalizarClave, marcarPiezasCantables, prepararPasos,
+    quitarRubricas, primerPasoQueSeReza,
     RE_FIN_FRASE, LARGO_MAX_FRASE, construirFrases, textoParaLeer, frasesDelPaso,
     LARGO_MAX_BLOQUE, agruparEnBloques, bloquesDelPaso,
     pasoSeLee, bloquesDeVoz

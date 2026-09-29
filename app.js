@@ -882,7 +882,17 @@
       if (dia) {
         estado.diaPreparado = true;
         voz.ultimoMotor = null;
-        await mostrarPasosListos(hora, dia.pasos);
+        // Los días preparados antes de este cambio todavía traen el aviso
+        // de Laudes: se quita aquí también, y se vuelven a marcar los
+        // salmos porque sus posiciones se corrieron.
+        let pasos = dia.pasos;
+        const limpios = L.quitarRubricas(pasos);
+        if (limpios.length !== pasos.length) {
+          limpios.forEach((p) => { delete p.pieza; });
+          L.marcarPiezasCantables(limpios);
+          pasos = limpios;
+        }
+        await mostrarPasosListos(hora, pasos);
         actualizarTextoEstadoVoz();
         return;
       }
@@ -915,7 +925,7 @@
     await cargarAudiosDePasos(pasos);
 
     estado.pasos = pasos;
-    estado.indice = 0;
+    estado.indice = L.primerPasoQueSeReza(pasos);
     el.oracionTitulo.textContent = hora.nombre;
     mostrarPantalla(el.oracion);
     mostrarPaso();
