@@ -1,4 +1,4 @@
-const CACHE = 'modo-rezar-v8';
+const CACHE = 'modo-rezar-v9';
 
 const ARCHIVOS_SHELL = [
   './',

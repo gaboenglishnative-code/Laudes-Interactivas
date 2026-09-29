@@ -95,6 +95,48 @@ en el PC si usas ambos.
 Puedes cambiar o quitar el audio asignado desde los enlaces que
 aparecen debajo del reproductor, en cualquier momento.
 
+### Canciones incluidas (para todos)
+
+Además, la app trae canciones ya asignadas en la carpeta `audios/`, que
+suenan para todo el que la abra, sin asignar nada. La lista está en
+`AUDIOS_PREDETERMINADOS`, al principio de `app.js`: la clave es el
+título de la pieza tal como lo trae la liturgia (en minúsculas, sin
+tildes, con guiones), y el valor es el archivo.
+
+| Canción | Pieza de la liturgia |
+|---|---|
+| invitatorio-salmo-94 | Salmo 94 (invitatorio, todos los días) |
+| benedictus | Cántico de Zacarías (Laudes, todos los días) |
+| salmo-8, 23, 32, 41, 46, 50, 56, 62, 99, 116, 117, 150 | El salmo de ese número |
+| salmo-146-147 | Salmos 146 y 147 (la canción tiene los dos) |
+| cantico-daniel-3-52-57 | Dn 3, 52-57 |
+| cantico-daniel-3-57-88 | Dn 3, 57-88.56 |
+| cantico-tobias-13 | Tb 13, 10-15.17-19 (Jerusalén reconstruida) |
+| cantico-ezequiel-36 | Ez 36, 24-28 |
+| cantico-exodo-15 | Ex 15, 1-4a.8-13.17-18 |
+
+Cómo se añade una canción nueva:
+
+1. **Número del salmo.** La Liturgia de las Horas numera como la
+   Biblia griega: el "Salmo 118" de muchas canciones ("Éste es el día
+   en que actuó el Señor") es aquí el 117; el "Salmo 63" ("Oh Dios, tú
+   eres mi Dios") es el 62. Conviene oír la letra: la canción que venía
+   como "Salmo 149 · Cantad al Señor" resultó ser el Salmo 116
+   ("pueblos todos... firme es su amor").
+2. **Clave exacta.** Se saca recorriendo la liturgia de varios meses
+   (así se hizo con todas las de arriba), porque el mismo salmo puede
+   venir con títulos distintos: entero en Laudes y partido en I, II,
+   III en otras horas. Una canción del salmo entero solo se asigna al
+   título del salmo entero; a las partes, no.
+3. **Volumen.** Todas están niveladas a -24 LUFS, el mismo volumen de
+   la voz, para que al pasar de la voz a la canción no haya un salto:
+   `ffmpeg -i entrada.mp3 -af volume=XdB -b:a 128k salida.mp3`, con X =
+   -24 menos el volumen medido
+   (`ffmpeg -i entrada.mp3 -af ebur128 -f null -`).
+
+Quien prefiera oír esos salmos leídos puede apagarlo en Ajustes:
+"Cantar los salmos y cánticos que tienen canción incluida".
+
 ## Reconocimiento de voz (manos libres)
 
 En "Responde tú" y al repetir la antífona, la app puede escuchar el

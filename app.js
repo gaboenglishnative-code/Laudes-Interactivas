@@ -18,16 +18,46 @@
   const agruparEnBloques = L.agruparEnBloques;
 
   // ---------------------------------------------------------------------
-  // Audios incluidos con la app: el Benedictus (Cántico de Zacarías, al
-  // final de Laudes, antes de las preces) y el Salmo 94 (invitatorio,
-  // el primer salmo del día) no rotan — se rezan igual siempre — así
-  // que van integrados y funcionan de una vez en cualquier dispositivo,
-  // sin que el usuario tenga que asignarlos.
+  // Canciones incluidas con la app: salmos y cánticos que, en vez de
+  // leerse, se escuchan cantados. Funcionan de una vez en cualquier
+  // dispositivo, sin que nadie tenga que asignarlos.
+  //
+  // La clave es el título de la pieza tal como lo trae la liturgia
+  // (normalizarClave), así que un salmo que vuelve cada cuatro semanas, o
+  // en otra hora, o en una fiesta, se reconoce solo. Las claves salen de
+  // recorrer la liturgia de mayo a septiembre de 2026.
+  //
+  // Ojo con la numeración: la Liturgia de las Horas numera los salmos
+  // como la Biblia griega. El "Salmo 118" de muchas canciones ("Éste es
+  // el día en que actuó el Señor") es aquí el Salmo 117.
+  //
+  // Todas están niveladas al mismo volumen que la voz (-24 LUFS), para
+  // que al pasar de la voz a la canción no haya un salto de volumen.
+  // Quien prefiera oír estos salmos leídos lo apaga en Ajustes.
   // ---------------------------------------------------------------------
 
   const AUDIOS_PREDETERMINADOS = {
     'salmo-94-invitacion-a-la-alabanza-divina': 'audios/invitatorio-salmo-94.mp3',
-    'cantico-de-zacarias-el-mesias-y-su-precursor-lc-1-68-79': 'audios/benedictus.mp3'
+    'cantico-de-zacarias-el-mesias-y-su-precursor-lc-1-68-79': 'audios/benedictus.mp3',
+    'cantico-que-la-creacion-entera-alabe-al-senor-dn-3-52-57': 'audios/cantico-daniel-3-52-57.mp3',
+    'cantico-toda-la-creacion-alabe-al-senor-dn-3-57-88-56': 'audios/cantico-daniel-3-57-88.mp3',
+    'cantico-himno-a-dios-despues-de-la-victoria-del-mar-rojo-ex-15-1-4-8-1': 'audios/cantico-exodo-15.mp3',
+    'cantico-dios-renovara-a-su-pueblo-ez-36-24-28': 'audios/cantico-ezequiel-36.mp3',
+    'cantico-accion-de-gracias-por-la-liberacion-del-pueblo-tb-13-10-15-17-': 'audios/cantico-tobias-13.mp3',
+    'salmo-116-invitacion-universal-a-la-alabanza-divina': 'audios/salmo-116.mp3',
+    'salmo-117-himno-de-accion-de-gracias-despues-de-la-victoria': 'audios/salmo-117.mp3',
+    'salmo-146-poder-y-bondad-del-senor': 'audios/salmo-146-147.mp3',
+    'salmo-147-restauracion-de-jerusalen': 'audios/salmo-146-147.mp3',
+    'salmo-150-alabad-al-senor': 'audios/salmo-150.mp3',
+    'salmo-23-entrada-solemne-de-dios-en-su-templo': 'audios/salmo-23.mp3',
+    'salmo-32-himno-al-poder-y-a-la-providencia-de-dios': 'audios/salmo-32.mp3',
+    'salmo-41-deseo-del-senor-y-ansias-de-contemplar-el-templo': 'audios/salmo-41.mp3',
+    'salmo-46-entronizacion-del-dios-de-israel': 'audios/salmo-46.mp3',
+    'salmo-50-confesion-del-pecador-arrepentido': 'audios/salmo-50.mp3',
+    'salmo-56-oracion-matutina-de-un-afligido': 'audios/salmo-56.mp3',
+    'salmo-62-2-9-el-alma-sedienta-de-dios': 'audios/salmo-62.mp3',
+    'salmo-8-majestad-del-senor-y-dignidad-del-hombre': 'audios/salmo-8.mp3',
+    'salmo-99-alegria-de-los-que-entran-en-el-templo': 'audios/salmo-99.mp3'
   };
 
   // ---------------------------------------------------------------------
@@ -96,7 +126,7 @@
         // Sin IndexedDB disponible: seguimos revisando los predeterminados.
       }
 
-      const predeterminado = AUDIOS_PREDETERMINADOS[paso.pieza.slug];
+      const predeterminado = voz.cantarIncluidas && AUDIOS_PREDETERMINADOS[paso.pieza.slug];
       if (predeterminado) {
         paso.pieza.audioURL = predeterminado;
         paso.pieza.audioNombre = null;
@@ -131,6 +161,7 @@
     tasa: parseFloat(localStorage.getItem('rezar_velocidad') || '1'),
     ultimoMotor: null,
     autoavanzar: localStorage.getItem('rezar_autoavanzar') !== 'false',
+    cantarIncluidas: localStorage.getItem('rezar_cantar_incluidas') !== 'false',
     reconocerVoz: localStorage.getItem('rezar_reconocer') !== 'false',
     vocesListas: false
   };
@@ -752,6 +783,7 @@
     btnConfig: document.getElementById('btn-config'),
     rangoVelocidad: document.getElementById('rango-velocidad'),
     checkAutoavanzar: document.getElementById('check-autoavanzar'),
+    checkCantar: document.getElementById('check-cantar'),
     checkReconocer: document.getElementById('check-reconocer'),
     notaReconocer: document.getElementById('nota-reconocer'),
     btnActivarMic: document.getElementById('btn-activar-mic'),
@@ -1118,7 +1150,7 @@
     const paso = pasoPiezaActual();
     if (!paso) return;
     await borrarAudio(paso.pieza.slug);
-    const predeterminado = AUDIOS_PREDETERMINADOS[paso.pieza.slug];
+    const predeterminado = voz.cantarIncluidas && AUDIOS_PREDETERMINADOS[paso.pieza.slug];
     paso.pieza.audioURL = predeterminado || null;
     paso.pieza.audioNombre = null;
     paso.pieza.esPredeterminado = !!predeterminado;
@@ -1341,6 +1373,7 @@
 
   el.rangoVelocidad.value = String(voz.tasa);
   el.checkAutoavanzar.checked = voz.autoavanzar;
+  el.checkCantar.checked = voz.cantarIncluidas;
 
   el.btnConfig.addEventListener('click', () => {
     el.panelConfig.hidden = !el.panelConfig.hidden;
@@ -1355,6 +1388,13 @@
   el.checkAutoavanzar.addEventListener('change', () => {
     voz.autoavanzar = el.checkAutoavanzar.checked;
     localStorage.setItem('rezar_autoavanzar', String(voz.autoavanzar));
+  });
+
+  // Vale desde la próxima hora que se abra (la que está abierta ya tiene
+  // decidido qué suena en cada salmo).
+  el.checkCantar.addEventListener('change', () => {
+    voz.cantarIncluidas = el.checkCantar.checked;
+    try { localStorage.setItem('rezar_cantar_incluidas', String(voz.cantarIncluidas)); } catch (e) { /* nada */ }
   });
 
   if (!SOPORTA_RECONOCIMIENTO) {
