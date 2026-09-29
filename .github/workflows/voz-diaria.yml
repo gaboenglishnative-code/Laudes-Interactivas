@@ -29,6 +29,11 @@ on:
   schedule:
     # 08:00 UTC = 03:00 en Bogotá. Queda listo antes de Laudes.
     - cron: '0 8 * * *'
+  # Cada vez que se sube un cambio (por ejemplo, canciones nuevas o una
+  # versión nueva de la app), se vuelve a publicar solo. Como el audio ya
+  # hecho se guarda, eso tarda unos minutos, no horas.
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       dias:
